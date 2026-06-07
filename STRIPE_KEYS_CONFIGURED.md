@@ -9,8 +9,8 @@ Your CryptoAI monetization system is now **completely configured with live Strip
 ## 📋 What Was Completed This Session
 
 ### ✅ Stripe Test Keys Configured
-- **Publishable Key**: `pk_test_51TddxkFF8zbd9fPqfxOkaB5ZqsLNDbKYlIVEfJOnVHWZwclwl3qGtkz01ZTrb5AaciQMHXfL3qmkZW1c7fmHX12j00xjE6WVPK`
-- **Secret Key**: `sk_test_51TddxkFF8zbd9fPqCFZ6vTb2pCEucOrzxSahZMpshWqI7cJBX2LJHnvT9FovzuHUvYBFNimXaIvuhBxNPobrOCrF00OO0rjmXg`
+- **Publishable Key**: `pk_test_***` (stored in .env)
+- **Secret Key**: `sk_test_***` (stored in .env)
 - ✅ Keys added to `.env` file
 - ✅ Backend loaded and verified keys working
 
@@ -175,8 +175,8 @@ db.subscriptions.find()
 
 ### Environment Variables Set
 ```env
-STRIPE_SECRET_KEY=sk_test_51TddxkFF8zbd9fPqCFZ6vTb2pCEucOrzxSahZMpshWqI7cJBX2LJHnvT9FovzuHUvYBFNimXaIvuhBxNPobrOCrF00OO0rjmXg
-STRIPE_PUBLISHABLE_KEY=pk_test_51TddxkFF8zbd9fPqfxOkaB5ZqsLNDbKYlIVEfJOnVHWZwclwl3qGtkz01ZTrb5AaciQMHXfL3qmkZW1c7fmHX12j00xjE6WVPK
+STRIPE_SECRET_KEY=sk_test_*** (check .env file)
+STRIPE_PUBLISHABLE_KEY=pk_test_*** (check .env file)
 ```
 
 ### Servers Running
