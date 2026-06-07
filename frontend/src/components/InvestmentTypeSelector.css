@@ -1,0 +1,620 @@
+.investment-type-selector {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.selector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.selector-header h3 {
+  font-size: 20px;
+  color: #333;
+  margin: 0;
+}
+
+.current-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.current-price .label {
+  font-size: 12px;
+  color: #999;
+}
+
+.current-price .price {
+  font-size: 18px;
+  font-weight: 600;
+  color: #667eea;
+}
+
+/* Investment Type Toggle */
+.investment-type-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.type-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 2px solid #e0e0e0;
+  background: #fafafa;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-align: left;
+}
+
+.type-btn:hover:not(:disabled) {
+  border-color: #667eea;
+  background: #f5f2ff;
+}
+
+.type-btn.active {
+  border-color: #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+}
+
+.type-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.type-icon {
+  font-size: 24px;
+}
+
+.type-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.type-title {
+  font-weight: 600;
+  color: #333;
+  font-size: 15px;
+}
+
+.type-desc {
+  font-size: 12px;
+  color: #999;
+}
+
+/* Investment Input Section */
+.investment-input-section {
+  margin-bottom: 24px;
+}
+
+.execution-settings {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fcfcff;
+}
+
+.execution-settings-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #666;
+}
+
+.provider-readiness-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.provider-pill {
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+}
+
+.provider-pill.ready {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-color: #b7dfbc;
+}
+
+.provider-pill.down {
+  background: #ffebee;
+  color: #c62828;
+  border-color: #f4b8bf;
+}
+
+.provider-pill.checking {
+  background: #eef3ff;
+  color: #2f4ea8;
+  border-color: #c8d6ff;
+}
+
+.execution-settings-warning {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #c62828;
+}
+
+.fake-confirm-box {
+  margin-top: 12px;
+  border: 1px solid #b7dfbc;
+  background: #eefaf0;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.fake-confirm-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f5d2f;
+}
+
+.fake-confirm-amount {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: #2a6a39;
+}
+
+.fake-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.fake-confirm-btn {
+  flex: 1;
+  min-height: 38px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fake-confirm-btn.no {
+  background: #fff;
+  color: #4b5563;
+  border: 1px solid #cdd3dd;
+}
+
+.fake-confirm-btn.yes {
+  background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);
+  color: #fff;
+  border: none;
+}
+
+.fake-confirm-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.input-type-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.toggle-btn {
+  padding: 10px 16px;
+  border: 2px solid #e0e0e0;
+  background: white;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 14px;
+  color: #666;
+  transition: all 0.3s ease;
+}
+
+.toggle-btn:hover:not(:disabled) {
+  border-color: #667eea;
+  color: #667eea;
+}
+
+.toggle-btn.active {
+  border-color: #667eea;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.toggle-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Input Group */
+.input-group {
+  margin-bottom: 16px;
+}
+
+.input-group label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: #555;
+  margin-bottom: 8px;
+}
+
+.input-wrapper {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.currency-symbol,
+.unit {
+  position: absolute;
+  font-weight: 600;
+  color: #667eea;
+}
+
+.currency-symbol {
+  left: 14px;
+  font-size: 16px;
+}
+
+.unit {
+  right: 14px;
+  font-size: 13px;
+}
+
+.input-wrapper input {
+  width: 100%;
+  padding: 12px 14px;
+  padding-left: 28px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 15px;
+  transition: all 0.3s ease;
+  background: #fafafa;
+}
+
+.input-wrapper input:focus {
+  outline: none;
+  border-color: #667eea;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.input-wrapper input:disabled {
+  background: #f5f5f5;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.input-wrapper select {
+  width: 100%;
+  padding: 12px 14px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 15px;
+  transition: all 0.3s ease;
+  background: #fafafa;
+}
+
+.input-wrapper select:focus {
+  outline: none;
+  border-color: #667eea;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.input-wrapper select:disabled {
+  background: #f5f5f5;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.share-selector-wrapper::after {
+  content: '';
+  position: absolute;
+  right: 14px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #667eea;
+  border-bottom: 2px solid #667eea;
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+.share-options-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.share-option-btn {
+  padding: 10px 0;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fff;
+  color: #555;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.share-option-btn:hover:not(:disabled) {
+  border-color: #667eea;
+  color: #667eea;
+  transform: translateY(-1px);
+}
+
+.share-option-btn.active {
+  border-color: #667eea;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+
+.share-option-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.share-selector-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #666;
+}
+
+/* Preset Amounts */
+.preset-amounts {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.preset-btn {
+  padding: 8px 12px;
+  border: 2px solid #e0e0e0;
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #667eea;
+  transition: all 0.2s ease;
+}
+
+.preset-btn:hover:not(:disabled) {
+  border-color: #667eea;
+  background: rgba(102, 126, 234, 0.05);
+  transform: translateY(-1px);
+}
+
+.preset-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Calculation Result */
+.calculation-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(102, 126, 234, 0.05);
+  border-radius: 6px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.calculation-result .label {
+  color: #666;
+}
+
+.calculation-result .value {
+  font-weight: 600;
+  color: #667eea;
+}
+
+/* Investment Summary */
+.investment-summary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 16px;
+  border-radius: 10px;
+  margin-top: 16px;
+}
+
+.investment-summary h4 {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  font-size: 14px;
+}
+
+.summary-row.total {
+  border-top: 1px solid rgba(255, 255, 255, 0.3);
+  padding-top: 12px;
+  margin-top: 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Message */
+.message {
+  padding: 14px 16px;
+  border-radius: 8px;
+  margin-top: 16px;
+  font-size: 14px;
+  animation: slideUp 0.3s ease;
+}
+
+.message.success {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-left: 4px solid #4caf50;
+}
+
+.message.error {
+  background: #ffebee;
+  color: #c62828;
+  border-left: 4px solid #f44336;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Invest Buttons */
+.invest-btn {
+  width: 100%;
+  padding: 14px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-top: 16px;
+}
+
+.invest-btn.fake-money-btn {
+  background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%);
+  color: white;
+}
+
+.invest-btn.fake-money-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+}
+
+.invest-btn.real-money-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.invest-btn.real-money-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.invest-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.invest-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.apple-pay-cta-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.apple-pay-cta-badge.ready {
+  background: #ecfdf3;
+  color: #166534;
+  border-color: #86efac;
+}
+
+.apple-pay-cta-badge.card-only {
+  background: #f8fafc;
+  color: #334155;
+  border-color: #d1d5db;
+}
+
+.apple-pay-cta-badge.https-required {
+  background: #fff7ed;
+  color: #9a3412;
+  border-color: #fdba74;
+}
+
+/* Payment Section */
+.payment-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 2px solid #f0f0f0;
+}
+
+.back-to-amount-btn {
+  padding: 10px 16px;
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  color: #666;
+  transition: all 0.3s ease;
+  margin-bottom: 16px;
+}
+
+.back-to-amount-btn:hover:not(:disabled) {
+  border-color: #667eea;
+  color: #667eea;
+  background: rgba(102, 126, 234, 0.05);
+}
+
+.back-to-amount-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  .investment-type-toggle {
+    grid-template-columns: 1fr;
+  }
+
+  .preset-amounts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .selector-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .current-price {
+    align-items: flex-start;
+  }
+
+  .share-options-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

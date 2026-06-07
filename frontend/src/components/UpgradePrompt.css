@@ -1,0 +1,63 @@
+.upgrade-prompt {
+  background: linear-gradient(135deg, #fff9e6 0%, #fff1cc 100%);
+  border: 2px solid #ffd54f;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.12);
+  transition: all 0.3s ease;
+}
+
+.upgrade-prompt:hover {
+  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.18);
+}
+
+.upgrade-prompt.compact {
+  padding: 11px 14px;
+}
+
+.upgrade-prompt-title {
+  margin: 0 0 6px 0;
+  color: #7a5300;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.upgrade-prompt-message {
+  margin: 0 0 10px 0;
+  color: #7a5300;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.upgrade-prompt-btn {
+  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 9px 16px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  transition: all 0.25s ease;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.25);
+  letter-spacing: 0.3px;
+}
+
+.upgrade-prompt-btn:hover {
+  background: linear-gradient(135deg, #f57c00 0%, #e65100 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.35);
+}
+
+.upgrade-prompt-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(255, 152, 0, 0.2);
+}
+
+.recommendations-upgrade {
+  margin-top: 8px;
+  margin-bottom: 16px;
+}

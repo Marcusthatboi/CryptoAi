@@ -1,0 +1,65 @@
+stages:
+  - test
+  - build
+  - security
+  - deploy
+
+variables:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip
+    - frontend/node_modules/
+
+backend_tests:
+  stage: test
+  image: python:3.11
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+  script:
+    - python -m unittest discover -s tests -t . -p "test_*.py" -v
+
+frontend_build:
+  stage: build
+  image: node:20
+  script:
+    - cd frontend
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - frontend/dist/
+
+security_scan:
+  stage: security
+  image: python:3.11
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install pip-audit
+  script:
+    - pip-audit
+
+npm_audit:
+  stage: security
+  image: node:20
+  script:
+    - cd frontend
+    - npm ci
+    - npm audit --omit=dev --audit-level=high
+
+deploy_prod:
+  stage: deploy
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - docker compose -f docker-compose.ha.yml up --build -d
+  only:
+    - main
+  when: manual

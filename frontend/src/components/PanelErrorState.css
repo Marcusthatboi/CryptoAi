@@ -1,0 +1,32 @@
+.panel-error-state {
+  padding: 16px;
+  border: 1px solid rgba(244, 67, 54, 0.35);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2a1a1a 0%, #3e1616 100%);
+  color: #ffb4b4;
+}
+
+.panel-error-state h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: #ffd2d2;
+}
+
+.panel-error-state p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.panel-error-retry-btn {
+  margin-top: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.panel-error-retry-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}

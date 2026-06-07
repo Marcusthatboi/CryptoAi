@@ -1,0 +1,142 @@
+.price-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 24px;
+  margin: 16px;
+  color: white;
+  min-width: 280px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.price-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+}
+
+.price-card.loading,
+.price-card.error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  font-size: 18px;
+}
+
+.price-card.error {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.card-header h3 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.update-status {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.update-status.live {
+  background: rgba(76, 175, 80, 0.3);
+  border-color: #81c784;
+  color: #c8e6c9;
+  animation: pulse-live 2s infinite;
+}
+
+.update-status.polling {
+  background: rgba(255, 152, 0, 0.3);
+  border-color: #ffb74d;
+  color: #ffe0b2;
+}
+
+@keyframes pulse-live {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+.change {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.change.positive {
+  background-color: rgba(76, 175, 80, 0.3);
+}
+
+.change.negative {
+  background-color: rgba(244, 67, 54, 0.3);
+}
+
+.card-body {
+  margin-bottom: 16px;
+}
+
+.price-display {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 16px;
+}
+
+.currency {
+  font-size: 24px;
+  margin-right: 8px;
+  opacity: 0.9;
+}
+
+.amount {
+  font-size: 40px;
+  font-weight: bold;
+  letter-spacing: -1px;
+}
+
+.details {
+  margin: 8px 0;
+  font-size: 14px;
+  opacity: 0.95;
+}
+
+.details span {
+  font-weight: 600;
+}
+
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.card-footer small {
+  opacity: 0.8;
+  font-size: 12px;
+  white-space: nowrap;
+}

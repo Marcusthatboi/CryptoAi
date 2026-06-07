@@ -1,0 +1,124 @@
+.activate-auto-trading-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background-color: rgba(0, 212, 255, 0.1);
+  border: 1px solid #00d4ff;
+  color: #00d4ff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  position: relative;
+  overflow: hidden;
+}
+
+.activate-auto-trading-btn:hover {
+  background-color: rgba(0, 212, 255, 0.2);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+}
+
+.activate-auto-trading-btn:active {
+  transform: translateY(0);
+}
+
+.activate-auto-trading-btn.active {
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.2) 0%, rgba(0, 212, 255, 0.1) 100%);
+  border-color: #4caf50;
+  color: #4caf50;
+  box-shadow: 0 0 10px rgba(76, 175, 80, 0.3);
+}
+
+.activate-auto-trading-btn.active:hover {
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.3) 0%, rgba(0, 212, 255, 0.15) 100%);
+  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+}
+
+.btn-icon {
+  font-size: 16px;
+  display: inline-block;
+  animation: float 3s ease-in-out infinite;
+}
+
+.activate-auto-trading-btn.active .btn-icon {
+  animation: spin 2s linear infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btn-text {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.active-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background-color: #4caf50;
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+  margin-left: 4px;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .activate-auto-trading-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .btn-icon {
+    font-size: 14px;
+  }
+
+  .btn-text {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 400px) {
+  .activate-auto-trading-btn {
+    padding: 6px 10px;
+    min-width: auto;
+  }
+
+  .btn-text {
+    display: none;
+  }
+
+  .btn-icon {
+    margin: 0;
+  }
+}

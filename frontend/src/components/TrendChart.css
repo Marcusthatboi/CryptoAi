@@ -1,0 +1,26 @@
+.trend-chart {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.trend-chart h3 {
+  margin-top: 0;
+  color: #333;
+  font-size: 20px;
+}
+
+.trend-chart.loading,
+.trend-chart.error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  color: #666;
+}
+
+.trend-chart.error {
+  color: #f5576c;
+}

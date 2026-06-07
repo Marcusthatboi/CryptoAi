@@ -1,0 +1,166 @@
+.alert-panel {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+.panel-header h3 {
+  margin: 0;
+  color: #333;
+  font-size: 20px;
+}
+
+.refresh-btn {
+  padding: 8px 16px;
+  background-color: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background-color 0.3s ease;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background-color: #764ba2;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error-message {
+  background-color: #ffebee;
+  color: #c62828;
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.notification-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #f8f9ff;
+  border: 1px solid #e0e5ff;
+  border-radius: 8px;
+}
+
+.notification-status {
+  font-size: 13px;
+  color: #2f3d6b;
+  font-weight: 600;
+}
+
+.notification-btn {
+  border: none;
+  background: #1e88e5;
+  color: #fff;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notification-btn:hover {
+  background: #1565c0;
+}
+
+.alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.no-alerts {
+  text-align: center;
+  padding: 32px;
+  color: #999;
+}
+
+.no-alerts p {
+  margin: 8px 0;
+  font-size: 16px;
+}
+
+.no-alerts small {
+  font-size: 12px;
+  display: block;
+  margin-top: 8px;
+}
+
+.alert-item {
+  display: flex;
+  align-items: flex-start;
+  padding: 16px;
+  border-radius: 8px;
+  border-left: 4px solid;
+  gap: 16px;
+}
+
+.alert-item.alert-up {
+  background-color: #e8f5e9;
+  border-left-color: #4caf50;
+}
+
+.alert-item.alert-down {
+  background-color: #ffebee;
+  border-left-color: #f44336;
+}
+
+.alert-icon {
+  font-size: 24px;
+  margin-top: 4px;
+}
+
+.alert-content {
+  flex: 1;
+}
+
+.alert-content h4 {
+  margin: 0 0 8px 0;
+  color: #333;
+  font-size: 16px;
+}
+
+.alert-content .change {
+  font-size: 18px;
+  font-weight: bold;
+  margin: 4px 0;
+}
+
+.alert-item.alert-up .change {
+  color: #4caf50;
+}
+
+.alert-item.alert-down .change {
+  color: #f44336;
+}
+
+.alert-content .price-range {
+  margin: 6px 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.alert-content small {
+  color: #999;
+  font-size: 12px;
+}

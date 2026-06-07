@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cryptoai-backend
+  namespace: cryptoai
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cryptoai-backend
+  template:
+    metadata:
+      labels:
+        app: cryptoai-backend
+    spec:
+      containers:
+        - name: backend
+          image: cryptoai-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8002
+          env:
+            - name: MONGODB_URL
+              value: mongodb://mongo:27017
+            - name: DB_NAME
+              value: cryptoai
+            - name: APP_ENV
+              value: production
+            - name: ENVIRONMENT
+              value: production
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cryptoai-secrets
+                  key: SECRET_KEY
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cryptoai-secrets
+                  key: STRIPE_SECRET_KEY
+            - name: STRIPE_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cryptoai-secrets
+                  key: STRIPE_PUBLISHABLE_KEY
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cryptoai-secrets
+                  key: STRIPE_WEBHOOK_SECRET
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8002
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cryptoai-backend
+  namespace: cryptoai
+spec:
+  selector:
+    app: cryptoai-backend
+  ports:
+    - port: 8002
+      targetPort: 8002
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cryptoai-backend-hpa
+  namespace: cryptoai
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cryptoai-backend
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65

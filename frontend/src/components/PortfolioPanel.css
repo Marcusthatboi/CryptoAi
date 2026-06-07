@@ -1,0 +1,148 @@
+.portfolio-panel {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-radius: 12px;
+  padding: 24px;
+  margin: 16px 0;
+  border: 1px solid rgba(100, 200, 255, 0.1);
+}
+
+.portfolio-panel.error {
+  background: linear-gradient(135deg, #2a1a1a 0%, #3e1616 100%);
+  border-color: rgba(244, 67, 54, 0.2);
+  color: #ff6b6b;
+}
+
+.portfolio-panel h2 {
+  color: #ffc107;
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.portfolio-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 193, 7, 0.1);
+}
+
+.stat-item label {
+  font-size: 12px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-item .stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: #ffc107;
+}
+
+.portfolio-details {
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.portfolio-details h3 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #e8e8e8;
+}
+
+.portfolio-details h4 {
+  margin: 12px 0 8px 0;
+  font-size: 13px;
+  color: #cfd8dc;
+}
+
+.portfolio-segments-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.portfolio-segment {
+  margin-top: 0;
+}
+
+.segment-fake {
+  border-left: 4px solid #42a5f5;
+}
+
+.segment-real {
+  border-left: 4px solid #26a69a;
+}
+
+.segment-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.segment-stat {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.segment-stat label {
+  font-size: 11px;
+  color: #9fb0bf;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.segment-stat-value {
+  font-size: 15px;
+  color: #e6edf3;
+  font-weight: 700;
+}
+
+.portfolio-details ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.portfolio-details li {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: #d8d8d8;
+}
+
+.portfolio-details li:last-child {
+  border-bottom: none;
+}
+
+.portfolio-retry-btn {
+  margin-top: 10px;
+  border: none;
+  background: #ffc107;
+  color: #111;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}

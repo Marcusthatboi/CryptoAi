@@ -1,0 +1,195 @@
+.support-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 16px;
+}
+
+.support-modal {
+  width: 100%;
+  max-width: 680px;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  max-height: 92vh;
+  overflow-y: auto;
+}
+
+.support-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.support-modal-header h3 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.support-close-btn {
+  border: 1px solid #d1d5db;
+  background: #f8fafc;
+  color: #111827;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.support-close-btn:hover {
+  background: #f1f5f9;
+}
+
+.support-subtitle {
+  margin: 10px 0 14px;
+  color: #334155;
+}
+
+.support-status-message {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.support-status-message.success {
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+
+.support-status-message.error {
+  background: #fff1f2;
+  border: 1px solid #fda4af;
+  color: #9f1239;
+}
+
+.support-label {
+  display: block;
+  margin: 12px 0 6px;
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.support-select,
+.support-input,
+.support-textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.support-select:focus,
+.support-input:focus,
+.support-textarea:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+.support-diagnostics-card {
+  margin-top: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 10px;
+}
+
+.support-diagnostics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.support-copy-btn {
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e40af;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.support-copy-btn:hover {
+  background: #dbeafe;
+}
+
+.support-diagnostics-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #1e293b;
+  white-space: pre-wrap;
+}
+
+.support-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.support-secondary-btn,
+.support-primary-btn {
+  border-radius: 8px;
+  padding: 9px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  border: none;
+}
+
+.support-secondary-btn {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.support-secondary-btn:hover {
+  background: #f1f5f9;
+}
+
+.support-primary-btn {
+  background: #1d4ed8;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.support-primary-btn:hover {
+  background: #1e40af;
+}
+
+.support-primary-btn:disabled,
+.support-secondary-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .support-modal {
+    padding: 14px;
+  }
+
+  .support-actions {
+    flex-direction: column;
+  }
+
+  .support-secondary-btn,
+  .support-primary-btn {
+    width: 100%;
+    text-align: center;
+  }
+}

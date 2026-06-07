@@ -1,0 +1,12 @@
+INFO:     Started server process [28788]
+INFO:     Waiting for application startup.
+INFO:backend.main:\u2705 API docs disabled for this environment
+INFO:backend.main:\u2705 Allowed frontend origins: https://dacryptobeast.com, https://www.dacryptobeast.com
+INFO:backend.main:\u2705 Database initialization skipped (use MongoDB separately)
+INFO:backend.db:\u2705 Connected to MongoDB: cryptoai
+INFO:backend.subscription:\u2705 Subscription collection initialized
+INFO:backend.main:\u2705 Subscription collection initialized
+INFO:backend.main:\u2705 Usage counter collections initialized
+INFO:backend.main:\u2705 Real trade payment index initialized
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8002 (Press CTRL+C to quit)

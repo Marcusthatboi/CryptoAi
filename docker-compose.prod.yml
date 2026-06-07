@@ -1,0 +1,43 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    env_file:
+      - .env
+    environment:
+      MONGODB_URL: mongodb://mongo:27017
+      DB_NAME: cryptoai
+      APP_ENV: production
+      ENVIRONMENT: production
+      MONGO_MAX_POOL_SIZE: 200
+      MONGO_MIN_POOL_SIZE: 20
+    ports:
+      - "8002:8002"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8002
+        VITE_WS_URL: ws://localhost:8002/ws
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:8080"
+
+volumes:
+  mongo_data:
