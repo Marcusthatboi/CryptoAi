@@ -519,13 +519,6 @@ def create_auto_trading_router(get_current_user_dependency, get_db_fn=get_db):
                 "status": {"$in": ["submitted", "open", "pending"]}
             }).sort("created_at", -1).to_list(length=None)
             
-            # Fetch current prices for P&L calculation
-            from backend.binance_api import get_client
-            try:
-                client = get_client()
-            except:
-                client = None
-            
             # Enrich trades with current price info
             enriched_trades = []
             for trade in active_trades:
@@ -540,21 +533,6 @@ def create_auto_trading_router(get_current_user_dependency, get_db_fn=get_db):
                     "created_at": trade.get("created_at", datetime.utcnow()).isoformat() if hasattr(trade.get("created_at"), "isoformat") else str(trade.get("created_at")),
                     "exchange": trade.get("exchange", "binance.us")
                 }
-                
-                # Try to get current price and calculate P&L
-                if client:
-                    try:
-                        ticker = client.get_symbol_info(trade.get("symbol"))
-                        if ticker:
-                            # Get latest price from order
-                            order_details = trade.get("order_details", {})
-                            entry_price = float(order_details.get("price", 0))
-                            if entry_price > 0:
-                                # This is approximate - in production would use real ticker
-                                trade_data["entry_price"] = entry_price
-                                trade_data["pnl_estimate"] = "Use live market data for accurate P&L"
-                    except:
-                        pass
                 
                 enriched_trades.append(trade_data)
             

@@ -2993,22 +2993,29 @@ async def get_user_portfolio_data(current_user: str = Depends(get_current_user))
                 "real_money": 0.0,
             }
         
-        # ENHANCEMENT: Enrich holdings with current live prices for accurate profit calculation
+        # ENHANCEMENT: Enrich holdings with current live prices using one batched fetch.
+        # This avoids a blocking network request per holding, which can stall the dashboard.
         holdings = portfolio.get("holdings", [])
+        symbols = [str(holding.get("symbol", "")).upper() for holding in holdings if str(holding.get("symbol", "")).upper()]
+        crypto_ids = [LIVE_PRICE_SYMBOLS.get(symbol) for symbol in symbols if LIVE_PRICE_SYMBOLS.get(symbol)]
+        live_prices = {}
+        if crypto_ids:
+            try:
+                live_prices = await get_multiple_prices_with_cache(crypto_ids)
+            except Exception as e:
+                logger.debug(f"Could not fetch batched live prices: {e}")
+
         for holding in holdings:
             symbol = str(holding.get("symbol", "")).upper()
-            if symbol:
+            crypto_id = LIVE_PRICE_SYMBOLS.get(symbol)
+            price_data = live_prices.get(crypto_id) if crypto_id else None
+            if price_data and price_data.get("price"):
                 try:
-                    crypto_id = LIVE_PRICE_SYMBOLS.get(symbol)
-                    if crypto_id:
-                        latest = fetch_crypto_price(crypto_id)
-                        if latest and latest.get("price"):
-                            current_price = float(latest["price"])
-                            holding["current_price"] = current_price
-                            holding["current_market_value"] = float(holding.get("quantity", 0) or 0) * current_price
+                    current_price = float(price_data["price"])
+                    holding["current_price"] = current_price
+                    holding["current_market_value"] = float(holding.get("quantity", 0) or 0) * current_price
                 except Exception as e:
-                    logger.debug(f"Could not fetch current price for {symbol}: {e}")
-                    pass  # Use existing price if fetch fails
+                    logger.debug(f"Could not apply current price for {symbol}: {e}")
         
         # Calculate unrealized profit from live prices
         total_unrealized = 0.0
