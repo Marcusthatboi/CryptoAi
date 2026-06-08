@@ -20,6 +20,14 @@ const ACTION_FILTERS = {
 
 const FALLBACK_POLL_INTERVAL_MS = 60000
 const REALTIME_REFRESH_COOLDOWN_MS = 30000
+const COUNTDOWN_TICK_MS = 1000
+
+const formatCountdown = (seconds) => {
+  const safeSeconds = Math.max(0, Number(seconds || 0))
+  const minutes = Math.floor(safeSeconds / 60)
+  const remainingSeconds = safeSeconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
+}
 
 export default function RecommendationsPanel() {
   const navigate = useNavigate()
@@ -50,18 +58,38 @@ export default function RecommendationsPanel() {
   const [shareMessage, setShareMessage] = useState('')
   const [integrationMessage, setIntegrationMessage] = useState('')
   const [integrationLoadingKey, setIntegrationLoadingKey] = useState('')
+  const [nextUpdateInSeconds, setNextUpdateInSeconds] = useState(FALLBACK_POLL_INTERVAL_MS / 1000)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null)
   const { isConnected, message } = useWebSocket()
   const requestInFlightRef = useRef(false)
   const lastRealtimeRefreshRef = useRef(0)
+  const nextAutoRefreshAtRef = useRef(Date.now() + FALLBACK_POLL_INTERVAL_MS)
+
+  const scheduleNextUpdate = useCallback((delayMs) => {
+    const safeDelay = Math.max(0, Number(delayMs || 0))
+    nextAutoRefreshAtRef.current = Date.now() + safeDelay
+    setNextUpdateInSeconds(Math.ceil(safeDelay / 1000))
+  }, [])
+
+  useEffect(() => {
+    const timerId = setInterval(() => {
+      const secondsLeft = Math.ceil((nextAutoRefreshAtRef.current - Date.now()) / 1000)
+      setNextUpdateInSeconds(Math.max(0, secondsLeft))
+    }, COUNTDOWN_TICK_MS)
+
+    return () => clearInterval(timerId)
+  }, [])
 
   useEffect(() => {
     fetchRecommendations()
+    scheduleNextUpdate(FALLBACK_POLL_INTERVAL_MS)
     // Fallback refresh in case websocket messages are delayed.
     const interval = setInterval(() => {
+      scheduleNextUpdate(FALLBACK_POLL_INTERVAL_MS)
       fetchRecommendations({ background: true })
     }, FALLBACK_POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [strategy, timePeriod, riskFilter, recommendationCount])
+  }, [strategy, timePeriod, riskFilter, recommendationCount, scheduleNextUpdate])
 
   useEffect(() => {
     if (!isConnected || !message || message.type !== 'price_update') {
@@ -74,8 +102,9 @@ export default function RecommendationsPanel() {
     }
 
     lastRealtimeRefreshRef.current = now
+    scheduleNextUpdate(REALTIME_REFRESH_COOLDOWN_MS)
     fetchRecommendations({ background: true })
-  }, [isConnected, message, strategy, timePeriod, riskFilter, recommendationCount])
+  }, [isConnected, message, strategy, timePeriod, riskFilter, recommendationCount, scheduleNextUpdate])
 
   const fetchRecommendations = useCallback(async ({ background = false } = {}) => {
     if (requestInFlightRef.current) {
@@ -114,6 +143,7 @@ export default function RecommendationsPanel() {
       setRetryAfterSeconds(null)
       setUpgradeRequired(false)
       setBlockedLimitType(null)
+      setLastUpdatedAt(new Date())
 
       window.dispatchEvent(new CustomEvent('subscription-usage-updated'))
     } catch (err) {
@@ -410,9 +440,12 @@ export default function RecommendationsPanel() {
       setError(null)
     } finally {
       requestInFlightRef.current = false
+      if (!background) {
+        scheduleNextUpdate(isConnected ? REALTIME_REFRESH_COOLDOWN_MS : FALLBACK_POLL_INTERVAL_MS)
+      }
       setLoading(false)
     }
-  }, [recommendationCount, strategy, timePeriod, riskFilter, recommendations.length])
+  }, [recommendationCount, strategy, timePeriod, riskFilter, recommendations.length, scheduleNextUpdate, isConnected])
 
   const getRiskColor = (risk) => {
     switch (risk) {
@@ -609,6 +642,14 @@ export default function RecommendationsPanel() {
       <div className="recommendations-header">
         <h2>🤖 AI Investment Recommendations</h2>
         <div className="header-controls">
+          <div className="live-refresh-status" title={isConnected ? 'Realtime websocket updates enabled' : 'Fallback polling mode active'}>
+            <span className={`live-dot ${isConnected ? 'connected' : 'fallback'}`}></span>
+            <span>{isConnected ? 'Live' : 'Polling'}</span>
+            <span className="status-separator">|</span>
+            <span>Next update {formatCountdown(nextUpdateInSeconds)}</span>
+            {lastUpdatedAt && <span className="status-separator">|</span>}
+            {lastUpdatedAt && <span>Updated {lastUpdatedAt.toLocaleTimeString()}</span>}
+          </div>
           <span className={`risk-badge ${riskLevel.toLowerCase()}`}>
             {getRiskEmoji(riskLevel)} {riskLevel} Risk
           </span>
