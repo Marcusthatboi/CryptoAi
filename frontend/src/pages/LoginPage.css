@@ -96,6 +96,10 @@
   color: #000;
 }
 
+.form-group input::placeholder {
+  color: #000;
+}
+
 .form-group input:hover {
   border-color: #d0d5e0;
   background-color: #f5f6f8;
@@ -106,6 +110,7 @@
   border-color: #667eea;
   box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.12);
   background-color: #ffffff;
+  color: #000;
 }
 
 .form-group input:active {
@@ -207,6 +212,10 @@
   color: #000;
 }
 
+.forgot-password-row input::placeholder {
+  color: #000;
+}
+
 .forgot-password-row input:hover {
   border-color: #bbc5d8;
   background-color: #f5f6f8;
@@ -217,6 +226,7 @@
   border-color: #5c6ac4;
   box-shadow: 0 0 0 3px rgba(92, 106, 196, 0.14);
   background-color: #ffffff;
+  color: #000;
 }
 
 .forgot-password-row input:active {
