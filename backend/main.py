@@ -340,7 +340,7 @@ async def get_single_price_with_cache(crypto_id: str, vs_currency: str = "usd") 
         if cached and _is_cache_fresh(cached.get("timestamp", 0), PRICE_CACHE_TTL_SECONDS):
             return dict(cached.get("data") or {})
 
-    fresh = fetch_crypto_price(normalized_id, vs_currency=vs_currency)
+    fresh = await asyncio.to_thread(fetch_crypto_price, normalized_id, vs_currency=vs_currency)
     if fresh:
         async with price_cache_lock:
             single_price_cache[normalized_id] = {
@@ -370,7 +370,7 @@ async def get_multiple_prices_with_cache(crypto_ids: List[str], vs_currency: str
         if cached_batch and _is_cache_fresh(cached_batch.get("timestamp", 0), PRICE_CACHE_TTL_SECONDS):
             return dict(cached_batch.get("data") or {})
 
-    fresh = fetch_multiple_cryptocurrencies(normalized_ids, vs_currency=vs_currency)
+    fresh = await asyncio.to_thread(fetch_multiple_cryptocurrencies, normalized_ids, vs_currency=vs_currency)
     if fresh:
         now = time.monotonic()
         async with price_cache_lock:
