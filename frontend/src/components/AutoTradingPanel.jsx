@@ -28,6 +28,16 @@ export default function AutoTradingPanel() {
 
   const fetchAutoTrades = async () => {
     try {
+      const token = localStorage.getItem('token')
+      if (!token) {
+        if (mountedRef.current) {
+          setAutoTrades([])
+          setError('Please log in to view auto trading data.')
+          setLoading(false)
+        }
+        return
+      }
+
       // Return cached data if valid
       if (autoTradeCache.isValid() && autoTradeCache.data) {
         setAutoTrades(autoTradeCache.data)
@@ -51,7 +61,9 @@ export default function AutoTradingPanel() {
       if (mountedRef.current) {
         console.error('Failed to fetch auto trades:', err)
         const detail = err?.response?.data?.detail
-        if (detail && detail.includes('Premium')) {
+        if (err?.response?.status === 401) {
+          setError('Please log in to view auto trading data.')
+        } else if (detail && detail.includes('Premium')) {
           setError('Premium subscription required.')
         } else {
           setError('Failed to load auto trading data.')
