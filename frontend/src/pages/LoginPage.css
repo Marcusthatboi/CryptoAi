@@ -55,22 +55,19 @@
 .auth-header h1 {
   font-size: 32px;
   margin: 0;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #000;
 }
 
 .auth-header p {
   font-size: 14px;
-  color: #666;
+  color: #000;
   margin: 0;
 }
 
 .auth-form h2 {
   font-size: 24px;
   margin: 0 0 30px 0;
-  color: #333;
+  color: #000;
   text-align: center;
 }
 
@@ -82,7 +79,7 @@
   display: block;
   font-size: 14px;
   font-weight: 600;
-  color: #333;
+  color: #000;
   margin-bottom: 8px;
 }
 
@@ -96,7 +93,7 @@
   transition: all 0.2s ease;
   box-sizing: border-box;
   background-color: #fafbfc;
-  color: #333;
+  color: #000;
 }
 
 .form-group input:hover {
@@ -194,7 +191,7 @@
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: #4b5563;
+  color: #000;
   margin-bottom: 8px;
 }
 
@@ -207,7 +204,7 @@
   font-weight: 500;
   transition: all 0.2s ease;
   background-color: #fafbfc;
-  color: #333;
+  color: #000;
 }
 
 .forgot-password-row input:hover {
@@ -229,7 +226,7 @@
 .forgot-password-note {
   margin-top: 10px;
   font-size: 13px;
-  color: #2f4f9b;
+  color: #000;
   text-align: center;
 }
 
@@ -264,7 +261,7 @@
 
 .auth-footer p {
   font-size: 14px;
-  color: #666;
+  color: #000;
   margin: 0;
 }
 
