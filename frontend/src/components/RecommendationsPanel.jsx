@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { cryptoAPI } from '../utils/api'
 import { useWebSocket } from '../hooks/useWebSocket'
@@ -17,6 +17,9 @@ const ACTION_FILTERS = {
   HOLD: { id: 'hold', label: 'Hold' },
   SELL_NOW: { id: 'sell-now', label: 'Sell Now' }
 }
+
+const FALLBACK_POLL_INTERVAL_MS = 60000
+const REALTIME_REFRESH_COOLDOWN_MS = 30000
 
 export default function RecommendationsPanel() {
   const navigate = useNavigate()
@@ -47,18 +50,44 @@ export default function RecommendationsPanel() {
   const [shareMessage, setShareMessage] = useState('')
   const [integrationMessage, setIntegrationMessage] = useState('')
   const [integrationLoadingKey, setIntegrationLoadingKey] = useState('')
-  const { isConnected } = useWebSocket()
+  const { isConnected, message } = useWebSocket()
+  const requestInFlightRef = useRef(false)
+  const lastRealtimeRefreshRef = useRef(0)
 
   useEffect(() => {
     fetchRecommendations()
-    // Refresh recommendations every 5 minutes
-    const interval = setInterval(fetchRecommendations, 300000)
+    // Fallback refresh in case websocket messages are delayed.
+    const interval = setInterval(() => {
+      fetchRecommendations({ background: true })
+    }, FALLBACK_POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [])
+  }, [strategy, timePeriod, riskFilter, recommendationCount])
 
-  const fetchRecommendations = async () => {
+  useEffect(() => {
+    if (!isConnected || !message || message.type !== 'price_update') {
+      return
+    }
+
+    const now = Date.now()
+    if (now - lastRealtimeRefreshRef.current < REALTIME_REFRESH_COOLDOWN_MS) {
+      return
+    }
+
+    lastRealtimeRefreshRef.current = now
+    fetchRecommendations({ background: true })
+  }, [isConnected, message, strategy, timePeriod, riskFilter, recommendationCount])
+
+  const fetchRecommendations = useCallback(async ({ background = false } = {}) => {
+    if (requestInFlightRef.current) {
+      return
+    }
+
+    requestInFlightRef.current = true
+
     try {
-      setLoading(true)
+      if (!background || recommendations.length === 0) {
+        setLoading(true)
+      }
       setError(null)
       const response = await cryptoAPI.getRecommendations(recommendationCount, {
         strategy,
@@ -380,9 +409,10 @@ export default function RecommendationsPanel() {
       setUpgradeRequired(false)
       setError(null)
     } finally {
+      requestInFlightRef.current = false
       setLoading(false)
     }
-  }
+  }, [recommendationCount, strategy, timePeriod, riskFilter, recommendations.length])
 
   const getRiskColor = (risk) => {
     switch (risk) {
