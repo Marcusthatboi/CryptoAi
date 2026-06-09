@@ -10,6 +10,7 @@ Supports both paper and live trading accounts.
 import os
 import logging
 import requests
+from types import SimpleNamespace
 from typing import Optional, Dict, List
 from dotenv import load_dotenv
 
@@ -42,6 +43,83 @@ class AlpacaAPIError(Exception):
     pass
 
 
+def _to_namespace(payload):
+    """Convert dictionaries/lists into attribute-accessible objects."""
+    if isinstance(payload, dict):
+        return SimpleNamespace(**{k: _to_namespace(v) for k, v in payload.items()})
+    if isinstance(payload, list):
+        return [_to_namespace(item) for item in payload]
+    return payload
+
+
+class AlpacaRESTFallback:
+    """Minimal Alpaca REST client used when alpaca-trade-api is unavailable."""
+
+    def __init__(self, key_id: str, secret_key: str, base_url: str):
+        self.base_url = str(base_url or "").rstrip("/")
+        self.headers = {
+            "APCA-API-KEY-ID": key_id,
+            "APCA-API-SECRET-KEY": secret_key,
+        }
+
+    def _request(self, method: str, path: str, params: Dict = None, json_body: Dict = None):
+        response = requests.request(
+            method=method,
+            url=f"{self.base_url}{path}",
+            headers=self.headers,
+            params=params,
+            json=json_body,
+            timeout=15,
+        )
+        if response.status_code >= 400:
+            raise AlpacaAPIError(
+                f"Alpaca REST error {response.status_code} on {path}: {response.text[:300]}"
+            )
+        if response.status_code == 204:
+            return None
+        return response.json()
+
+    def get_account(self):
+        return _to_namespace(self._request("GET", "/v2/account"))
+
+    def list_positions(self):
+        return _to_namespace(self._request("GET", "/v2/positions"))
+
+    def get_latest_crypto_quotes(self, symbols: List[str]):
+        symbol_value = ",".join(symbols or [])
+        payload = self._request(
+            "GET",
+            "/v1beta3/crypto/us/latest/quotes",
+            params={"symbols": symbol_value},
+        )
+        quotes = (payload or {}).get("quotes", {})
+        return {key: _to_namespace(value) for key, value in quotes.items()}
+
+    def submit_order(self, symbol: str, qty: float, side: str, type: str, time_in_force: str):
+        payload = self._request(
+            "POST",
+            "/v2/orders",
+            json_body={
+                "symbol": symbol,
+                "qty": str(qty),
+                "side": side,
+                "type": type,
+                "time_in_force": time_in_force,
+            },
+        )
+        return _to_namespace(payload)
+
+    def cancel_order(self, order_id: str):
+        self._request("DELETE", f"/v2/orders/{order_id}")
+
+    def list_orders(self, status: str = "all"):
+        payload = self._request("GET", "/v2/orders", params={"status": status, "direction": "desc"})
+        return _to_namespace(payload)
+
+    def get_order(self, order_id: str):
+        return _to_namespace(self._request("GET", f"/v2/orders/{order_id}"))
+
+
 def get_alpaca_client():
     """Get or create Alpaca API client using Trading API credentials"""
     global _alpaca_client
@@ -60,15 +138,6 @@ def get_alpaca_client():
     elif _alpaca_client is not None:
         return _alpaca_client
     
-    # Try to import REST if not already done
-    try:
-        from alpaca_trade_api import REST
-    except ImportError as e:
-        import traceback
-        error_msg = f"ImportError: {str(e)}\nTraceback:\n{traceback.format_exc()}"
-        logger.error(error_msg)
-        raise AlpacaAuthError(f"alpaca-trade-api import failed: {str(e)}")
-    
     if not key_id or not secret_key:
         logger.error("Missing Alpaca API credentials")
         raise AlpacaAuthError(
@@ -79,13 +148,20 @@ def get_alpaca_client():
         logger.info(f"Creating Alpaca REST client (paper trading mode)")
         logger.info(f"  Base URL: {base_url}")
         
-        # Create client with Legacy authentication (API Key ID + Secret Key)
-        _alpaca_client = REST(
-            key_id=key_id,
-            secret_key=secret_key,
-            base_url=base_url,
-            api_version="v2"
-        )
+        # Prefer official SDK when available; use HTTP fallback otherwise.
+        try:
+            from alpaca_trade_api import REST
+
+            _alpaca_client = REST(
+                key_id=key_id,
+                secret_key=secret_key,
+                base_url=base_url,
+                api_version="v2"
+            )
+            logger.info("Using alpaca-trade-api SDK client")
+        except ImportError:
+            logger.warning("alpaca-trade-api unavailable; using direct REST fallback client")
+            _alpaca_client = AlpacaRESTFallback(key_id=key_id, secret_key=secret_key, base_url=base_url)
         
         logger.info("Successfully connected to Alpaca Trading API")
         return _alpaca_client
