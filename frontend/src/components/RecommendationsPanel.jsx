@@ -60,6 +60,7 @@ export default function RecommendationsPanel() {
   const [integrationLoadingKey, setIntegrationLoadingKey] = useState('')
   const [nextUpdateInSeconds, setNextUpdateInSeconds] = useState(FALLBACK_POLL_INTERVAL_MS / 1000)
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null)
+  const [candidateUniverse, setCandidateUniverse] = useState([])
   const { isConnected, message } = useWebSocket()
   const requestInFlightRef = useRef(false)
   const lastRealtimeRefreshRef = useRef(0)
@@ -140,6 +141,7 @@ export default function RecommendationsPanel() {
       setApiCallsRemainingThisHour(response.data.api_calls_remaining_this_hour ?? null)
       setDailyResetAt(response.data.daily_reset_at ?? null)
       setHourlyResetAt(response.data.hourly_reset_at ?? null)
+      setCandidateUniverse(Array.isArray(response.data.candidate_universe) ? response.data.candidate_universe : [])
       setRetryAfterSeconds(null)
       setUpgradeRequired(false)
       setBlockedLimitType(null)
@@ -430,12 +432,20 @@ export default function RecommendationsPanel() {
         action_category: 'buy-now',
         action_label: 'BUY NOW'
       }))
+
+      const fallbackUniverse = enrichedMockRecs.slice(0, 10).map((rec, index) => ({
+        crypto_id: String(rec.symbol || '').toLowerCase(),
+        symbol: String(rec.symbol || '').toUpperCase(),
+        score: 100 - index,
+        sources: ['fallback']
+      }))
       
       setRecommendations(enrichedMockRecs)
       setReasoning('Portfolio analysis based on technical indicators, market sentiment, and fundamental metrics. Diversified allocation across different market caps and risk profiles.')
       setRiskLevel('LOW')
       setTier((previousTier) => previousTier)
       setLimitApplied(20)
+      setCandidateUniverse(fallbackUniverse)
       setUpgradeRequired(false)
       setError(null)
     } finally {
@@ -695,6 +705,27 @@ export default function RecommendationsPanel() {
             <div className="reasoning-box">
               <p className="reasoning-label">📊 Analysis Basis:</p>
               <p className="reasoning-text">{reasoning}</p>
+            </div>
+          )}
+
+          {candidateUniverse.length > 0 && (
+            <div className="candidate-universe-box">
+              <div className="candidate-universe-header">
+                <p className="candidate-universe-title">🌐 Top 10 Candidate Universe</p>
+                <span className="candidate-universe-count">{candidateUniverse.length} assets</span>
+              </div>
+              <p className="candidate-universe-subtitle">
+                AI recommendations are generated only from these ranked assets gathered from connected APIs.
+              </p>
+              <div className="candidate-universe-grid">
+                {candidateUniverse.map((asset, idx) => (
+                  <div key={`${String(asset.crypto_id || asset.symbol || idx)}-${idx}`} className="candidate-chip">
+                    <span className="candidate-rank">#{idx + 1}</span>
+                    <span className="candidate-symbol">{String(asset.symbol || asset.crypto_id || 'N/A').toUpperCase()}</span>
+                    <span className="candidate-sources">{Array.isArray(asset.sources) ? asset.sources.join(' + ') : 'unknown source'}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
