@@ -101,6 +101,7 @@ from backend.auth import (
     create_user,
     authenticate_user,
     has_insecure_secret_key,
+    has_weak_secret_key,
     get_user_by_id,
     get_user_portfolio,
     update_user_portfolio,
@@ -504,11 +505,17 @@ async def startup_event():
     if app_env == "production" and has_insecure_secret_key():
         raise RuntimeError("SECRET_KEY must be set to a secure value in production")
 
+    if app_env == "production" and has_weak_secret_key():
+        raise RuntimeError("SECRET_KEY must be at least 32 characters and not placeholder-like in production")
+
     if app_env == "production" and SUBSCRIPTION_AVAILABLE and has_insecure_stripe_config():
         raise RuntimeError("Stripe keys must be set to real values in production")
 
     if has_insecure_secret_key():
         logger.warning("⚠️ Using default SECRET_KEY. Set SECRET_KEY before production deployment.")
+
+    if has_weak_secret_key():
+        logger.warning("⚠️ SECRET_KEY appears weak or placeholder-like. Use a strong random key before production.")
 
     if SUBSCRIPTION_AVAILABLE and has_insecure_stripe_config():
         logger.warning("⚠️ Using placeholder Stripe keys. Configure Stripe credentials before production deployment.")

@@ -45,6 +45,17 @@ def has_insecure_secret_key() -> bool:
     """Return True when JWT signing is using the unsafe development default."""
     return not SECRET_KEY or SECRET_KEY == "your-secret-key-change-in-production"
 
+
+def has_weak_secret_key() -> bool:
+    """Return True when JWT signing key is too short or clearly placeholder-like."""
+    value = str(SECRET_KEY or "").strip()
+    if not value:
+        return True
+    if len(value) < 32:
+        return True
+    lowered = value.lower()
+    return any(token in lowered for token in ["replace", "changeme", "todo", "secret-key"])
+
 # Password hashing - use pbkdf2_sha256 which doesn't require external C libraries
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
