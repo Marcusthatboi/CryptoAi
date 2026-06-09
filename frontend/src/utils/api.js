@@ -260,8 +260,11 @@ export const cryptoAPI = {
     api.post(`/api/auto-trading-per-coin/disable/${symbol}`, null, { timeout: 8000 }),
   getAutoTradingCoinSettings: (symbol) =>
     api.get(`/api/auto-trading-per-coin/settings/${symbol}`, { timeout: 7000 }),
-  getAllActiveAutoTradingCoins: () =>
-    api.get('/api/auto-trading-per-coin/active', { timeout: 7000 }),
+  getAllActiveAutoTradingCoins: (options = {}) =>
+    api.get('/api/auto-trading-per-coin/active', {
+      timeout: options.timeout ?? 15000,
+      retryAttempts: options.retryAttempts
+    }),
   getAutoTradingCoinHistory: (symbol, limit = 50) =>
     api.get(`/api/auto-trading-per-coin/history/${symbol}`, { params: { limit }, timeout: 7000 }),
   getAutoTradingCoinStats: (symbol) =>

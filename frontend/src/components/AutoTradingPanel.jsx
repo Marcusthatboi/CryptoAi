@@ -4,6 +4,7 @@ import { cryptoAPI } from '../utils/api'
 import './AutoTradingPanel.css'
 
 const formatCurrency = (value) => `$${Number(value || 0).toFixed(2)}`
+const AUTO_TRADING_REFRESH_MS = 45000
 
 // Cache with 2-minute TTL
 const CACHE_TTL = 120000
@@ -23,10 +24,16 @@ export default function AutoTradingPanel() {
   useEffect(() => {
     mountedRef.current = true
     fetchAutoTrades()
-    return () => { mountedRef.current = false }
+    const intervalId = setInterval(() => {
+      fetchAutoTrades({ background: true })
+    }, AUTO_TRADING_REFRESH_MS)
+    return () => {
+      mountedRef.current = false
+      clearInterval(intervalId)
+    }
   }, [])
 
-  const fetchAutoTrades = async () => {
+  const fetchAutoTrades = async ({ background = false } = {}) => {
     try {
       const token = localStorage.getItem('token')
       if (!token) {
@@ -45,8 +52,11 @@ export default function AutoTradingPanel() {
         return
       }
 
-      setLoading(true)
-      const response = await cryptoAPI.getAllActiveAutoTradingCoins()
+      if (!background) {
+        setLoading(true)
+      }
+
+      const response = await cryptoAPI.getAllActiveAutoTradingCoins({ timeout: 30000, retryAttempts: 1 })
       const trades = response.data?.active_trades || []
       
       if (mountedRef.current) {
@@ -65,10 +75,15 @@ export default function AutoTradingPanel() {
           setError('Please log in to view auto trading data.')
         } else if (detail && detail.includes('Premium')) {
           setError('Premium subscription required.')
+        } else if (err?.code === 'ECONNABORTED' && autoTradeCache.data) {
+          setAutoTrades(autoTradeCache.data)
+          setError('Live refresh delayed. Showing last known auto trading data.')
         } else {
           setError('Failed to load auto trading data.')
         }
-        setAutoTrades([])
+        if (!autoTradeCache.data) {
+          setAutoTrades([])
+        }
       }
     } finally {
       if (mountedRef.current) {
@@ -89,6 +104,9 @@ export default function AutoTradingPanel() {
     return (
       <div className="auto-trading-panel">
         <div className="error-message">{error}</div>
+        <button className="setup-btn" onClick={() => fetchAutoTrades()}>
+          Retry
+        </button>
       </div>
     )
   }
