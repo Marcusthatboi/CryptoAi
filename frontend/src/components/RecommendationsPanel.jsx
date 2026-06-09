@@ -124,24 +124,25 @@ export default function RecommendationsPanel() {
         timePeriod,
         riskLevel: riskFilter
       })
-      const resolvedTier = response?.data?.tier
-        ? String(response.data.tier).trim().toLowerCase()
+      const payload = response?.data || {}
+      const resolvedTier = payload?.tier
+        ? String(payload.tier).trim().toLowerCase()
         : null
 
-      setRecommendations(response.data.recommendations || [])
-      setReasoning(response.data.reasoning)
-      setRiskLevel(response.data.risk_level)
+      setRecommendations(Array.isArray(payload.recommendations) ? payload.recommendations : [])
+      setReasoning(payload.reasoning || '')
+      setRiskLevel(payload.risk_level || 'LOW')
       setTier((previousTier) => resolvedTier || previousTier)
-      setLimitApplied(response.data.limit_applied || 0)
-      setSignalsDailyLimit(response.data.signals_daily_limit ?? null)
-      setSignalsUsedToday(response.data.signals_used_today ?? null)
-      setSignalsRemainingToday(response.data.signals_remaining_today ?? null)
-      setApiCallsHourlyLimit(response.data.api_calls_hourly_limit ?? null)
-      setApiCallsUsedThisHour(response.data.api_calls_used_this_hour ?? null)
-      setApiCallsRemainingThisHour(response.data.api_calls_remaining_this_hour ?? null)
-      setDailyResetAt(response.data.daily_reset_at ?? null)
-      setHourlyResetAt(response.data.hourly_reset_at ?? null)
-      setCandidateUniverse(Array.isArray(response.data.candidate_universe) ? response.data.candidate_universe : [])
+      setLimitApplied(payload.limit_applied || 0)
+      setSignalsDailyLimit(payload.signals_daily_limit ?? null)
+      setSignalsUsedToday(payload.signals_used_today ?? null)
+      setSignalsRemainingToday(payload.signals_remaining_today ?? null)
+      setApiCallsHourlyLimit(payload.api_calls_hourly_limit ?? null)
+      setApiCallsUsedThisHour(payload.api_calls_used_this_hour ?? null)
+      setApiCallsRemainingThisHour(payload.api_calls_remaining_this_hour ?? null)
+      setDailyResetAt(payload.daily_reset_at ?? null)
+      setHourlyResetAt(payload.hourly_reset_at ?? null)
+      setCandidateUniverse(Array.isArray(payload.candidate_universe) ? payload.candidate_universe : [])
       setRetryAfterSeconds(null)
       setUpgradeRequired(false)
       setBlockedLimitType(null)
