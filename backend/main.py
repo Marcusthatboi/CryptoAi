@@ -2348,6 +2348,40 @@ def _normalize_cg_symbol(value: str) -> str:
     return str(value or "").strip().upper()
 
 
+def _crypto_id_to_symbol(crypto_id: str) -> str:
+    target = str(crypto_id or "").strip().lower()
+    if not target:
+        return ""
+
+    for symbol, mapped_id in TICKER_TO_CRYPTO_ID.items():
+        if str(mapped_id).lower() == target:
+            return symbol
+
+    return target.upper()
+
+
+def _build_local_fallback_universe(df: pd.DataFrame, limit: int = 10) -> List[Dict[str, Any]]:
+    """Derive a deterministic top universe from local market data when APIs are unavailable."""
+    if df is None or len(df) == 0 or "id" not in df.columns:
+        return []
+
+    capped_limit = max(1, min(int(limit or 10), 10))
+    unique_ids = [str(value).strip().lower() for value in df["id"].dropna().unique().tolist() if str(value).strip()]
+
+    universe: List[Dict[str, Any]] = []
+    for rank, crypto_id in enumerate(unique_ids[:capped_limit], start=1):
+        universe.append(
+            {
+                "crypto_id": crypto_id,
+                "symbol": _crypto_id_to_symbol(crypto_id),
+                "score": float(capped_limit - rank + 1),
+                "sources": ["local-fallback"],
+            }
+        )
+
+    return universe
+
+
 async def build_top_recommendation_universe(limit: int = 10) -> List[Dict[str, Any]]:
     """Build a ranked candidate universe from connected market APIs.
 
@@ -2607,7 +2641,8 @@ async def get_ai_recommendations(
                 "status": "success",
                 "recommendations": [],
                 "reasoning": "Insufficient market data. Please refresh prices first.",
-                "risk_level": "N/A"
+                "risk_level": "N/A",
+                "candidate_universe": []
             }
             if not user_id:
                 set_cached_response(cache_key, response, ttl_seconds=300)
@@ -2615,6 +2650,9 @@ async def get_ai_recommendations(
         
         # Build a multi-API top universe and constrain recommendations to it.
         top_universe = await build_top_recommendation_universe(limit=10)
+        if not top_universe:
+            top_universe = _build_local_fallback_universe(df, limit=10)
+
         top_universe_ids = [item.get("crypto_id") for item in top_universe if item.get("crypto_id")]
         top_universe_symbols = {
             str(item.get("symbol", "")).upper()
@@ -2758,6 +2796,14 @@ async def get_ai_recommendations(
                 }
                 recommendation.update(derive_recommendation_action(recommendation))
                 recommendations.append(recommendation)
+
+        # Clamp final recommendation set strictly to top-universe symbols.
+        if top_universe_symbols:
+            recommendations = [
+                rec
+                for rec in recommendations
+                if str(rec.get("symbol", "")).upper() in top_universe_symbols
+            ]
 
         recommendations = [
             {
