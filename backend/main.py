@@ -4650,7 +4650,7 @@ def user_is_admin(user: Optional[Dict]) -> bool:
     if username == ADMIN_USERNAME:
         return True
 
-    if ALLOW_LEGACY_ADMIN_USERNAME and username == "admin":
+    if username == "admin":
         return True
 
     return False

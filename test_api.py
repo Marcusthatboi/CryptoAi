@@ -1,16 +1,29 @@
+"""Pytest integration check for Yahoo Finance endpoint."""
+
+import pytest
 import requests
-import json
 
-# Test Yahoo Finance endpoint
-r = requests.get('http://localhost:8000/api/data/yahoo-finance?symbol=AAPL&period=1y')
-result = r.json()
 
-print(f"Status: {r.status_code}")
-print(f"Records: {result.get('count')}")
+API_BASE = "http://127.0.0.1:8000"
 
-if result.get('data') and len(result.get('data')) > 0:
-    print(f"✅ First record: {json.dumps(result['data'][0], indent=2)}")
-    print(f"\n✅ Last record: {json.dumps(result['data'][-1], indent=2)}")
-else:
-    print("❌ No data returned")
-    print(f"Response: {json.dumps(result, indent=2)}")
+
+def _ensure_backend_available() -> None:
+    try:
+        response = requests.get(f"{API_BASE}/docs", timeout=5)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        pytest.skip(f"Backend not reachable at {API_BASE}: {exc}")
+
+
+@pytest.mark.integration
+def test_yahoo_finance_endpoint_smoke():
+    _ensure_backend_available()
+
+    response = requests.get(
+        f"{API_BASE}/api/data/yahoo-finance?symbol=AAPL&period=1y",
+        timeout=20,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get("symbol") == "AAPL"
+    assert isinstance(payload.get("data"), list)
