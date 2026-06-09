@@ -18,6 +18,7 @@ from pathlib import Path
 import logging
 import asyncio
 import json
+import math
 import pandas as pd
 import time
 from collections import defaultdict, deque
@@ -2294,6 +2295,150 @@ class RecommendationResponse(BaseModel):
     timestamp: datetime
 
 
+TICKER_TO_CRYPTO_ID = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "USDT": "tether",
+    "BNB": "binancecoin",
+    "USDC": "usd-coin",
+    "ADA": "cardano",
+    "SOL": "solana",
+    "XRP": "ripple",
+    "TRX": "tron",
+    "TON": "toncoin",
+    "DOT": "polkadot",
+    "DOGE": "dogecoin",
+    "SHIB": "shiba-inu",
+    "AVAX": "avalanche-2",
+    "LINK": "chainlink",
+    "MATIC": "polygon",
+    "LTC": "litecoin",
+    "UNI": "uniswap",
+    "BCH": "bitcoin-cash",
+    "NEAR": "near",
+    "XLM": "stellar",
+    "FIL": "filecoin",
+    "HBAR": "hedera-hashgraph",
+    "ATOM": "cosmos",
+    "ALGO": "algorand",
+    "APT": "aptos",
+    "ARB": "arbitrum",
+    "OP": "optimism",
+    "RENDER": "render-token",
+    "IMX": "immutable-x",
+}
+
+
+def _extract_binance_base_symbol(pair: str) -> str:
+    value = str(pair or "").upper().strip()
+    for suffix in ("USDT", "BUSD", "USDC", "USD"):
+        if value.endswith(suffix):
+            return value[: -len(suffix)]
+    return value
+
+
+def _normalize_cg_symbol(value: str) -> str:
+    return str(value or "").strip().upper()
+
+
+async def build_top_recommendation_universe(limit: int = 10) -> List[Dict[str, Any]]:
+    """Build a ranked candidate universe from connected market APIs.
+
+    The score blends breadth (CoinGecko market-cap ordering) and momentum
+    (Binance top gainers), then returns the strongest assets.
+    """
+    capped_limit = max(1, min(int(limit or 10), 10))
+
+    # Base universe from CoinGecko market-cap ordering.
+    catalog = await asyncio.to_thread(fetch_available_cryptocurrencies, 250)
+    if not catalog:
+        return []
+
+    symbol_to_id: Dict[str, str] = {}
+    candidate_scores: Dict[str, Dict[str, Any]] = {}
+
+    for rank, asset in enumerate(catalog, start=1):
+        crypto_id = str(asset.get("id", "")).strip().lower()
+        if not crypto_id:
+            continue
+
+        symbol = _normalize_cg_symbol(asset.get("symbol", ""))
+        if symbol and symbol not in symbol_to_id:
+            symbol_to_id[symbol] = crypto_id
+
+        rank_score = max(0.0, 120.0 - (rank * 0.4))
+        candidate = candidate_scores.setdefault(
+            crypto_id,
+            {
+                "crypto_id": crypto_id,
+                "symbol": symbol or crypto_id.upper(),
+                "score": 0.0,
+                "sources": set(),
+            },
+        )
+        candidate["score"] += rank_score
+        candidate["sources"].add("coingecko")
+
+    # Add CoinGecko momentum/quality signals for top assets.
+    quote_ids = [entry["crypto_id"] for entry in sorted(candidate_scores.values(), key=lambda item: item["score"], reverse=True)[:120]]
+    if quote_ids:
+        quote_data = await asyncio.to_thread(data_manager.get_coingecko_crypto, quote_ids)
+        for crypto_id, payload in (quote_data or {}).items():
+            candidate = candidate_scores.get(crypto_id)
+            if not candidate:
+                continue
+
+            change_24h = float(payload.get("usd_24h_change", 0) or 0)
+            market_cap = float(payload.get("usd_market_cap", 0) or 0)
+            volume_24h = float(payload.get("usd_24h_vol", 0) or 0)
+
+            candidate["score"] += max(min(change_24h, 25.0), -15.0) * 0.9
+            if market_cap > 0:
+                candidate["score"] += min(math.log10(market_cap), 13.0) * 1.1
+            if volume_24h > 0:
+                candidate["score"] += min(math.log10(volume_24h), 12.0) * 0.7
+
+    # Add Binance momentum boost if credentials are available.
+    try:
+        gainers = await asyncio.to_thread(get_top_gainers, 80)
+    except Exception as exc:
+        logger.debug(f"Binance gainers unavailable for recommendation universe: {exc}")
+        gainers = []
+
+    for item in gainers or []:
+        pair = str(item.get("symbol", "")).upper()
+        base_symbol = _extract_binance_base_symbol(pair)
+        crypto_id = symbol_to_id.get(base_symbol) or TICKER_TO_CRYPTO_ID.get(base_symbol)
+        if not crypto_id:
+            continue
+
+        candidate = candidate_scores.setdefault(
+            crypto_id,
+            {
+                "crypto_id": crypto_id,
+                "symbol": base_symbol,
+                "score": 0.0,
+                "sources": set(),
+            },
+        )
+
+        change_percent = float(item.get("change_percent", 0) or 0)
+        quote_volume = float(item.get("volume", 0) or 0)
+        candidate["score"] += max(min(change_percent, 30.0), -20.0) * 1.2
+        if quote_volume > 0:
+            candidate["score"] += min(math.log10(quote_volume), 12.0) * 0.8
+        candidate["sources"].add("binance")
+
+    ranked = sorted(candidate_scores.values(), key=lambda item: item["score"], reverse=True)[:capped_limit]
+    return [
+        {
+            **item,
+            "sources": sorted(item.get("sources", set())),
+        }
+        for item in ranked
+    ]
+
+
 def derive_recommendation_action(recommendation: Dict[str, Any]) -> Dict[str, str]:
     """Classify a recommendation into buy-now, hold, or sell-now for UI grouping.
     
@@ -2461,20 +2606,36 @@ async def get_ai_recommendations(
                 set_cached_response(cache_key, response, ttl_seconds=300)
             return response
         
-        # Analyze trends for all cryptocurrencies
-        trends = analyze_multiple_trends(df, sma_window=5)
+        # Build a multi-API top universe and constrain recommendations to it.
+        top_universe = await build_top_recommendation_universe(limit=10)
+        top_universe_ids = [item.get("crypto_id") for item in top_universe if item.get("crypto_id")]
+        top_universe_symbols = {
+            str(item.get("symbol", "")).upper()
+            for item in top_universe
+            if str(item.get("symbol", "")).strip()
+        }
+
+        scoped_df = df
+        if top_universe_ids and "id" in df.columns:
+            candidate_df = df[df["id"].isin(top_universe_ids)]
+            if candidate_df is not None and len(candidate_df) > 0:
+                scoped_df = candidate_df
+
+        trends = analyze_multiple_trends(scoped_df, sma_window=5)
         
         # Generate recommendations using AI if available, else use pattern matching
         recommendations = []
         
         if check_ollama_health():
             # Use AI model
-            market_summary = f"Available cryptocurrencies: {len(df['id'].unique())}. "
+            market_summary = f"Available cryptocurrencies: {len(scoped_df['id'].unique())}. "
+            market_summary += f"Top universe from connected APIs: {', '.join([item.get('symbol', 'N/A') for item in top_universe])}. "
             market_summary += f"Top performers: {', '.join([t.get('crypto_id', 'N/A').upper() for t in trends[:3]])}"
             
             prompt = f"""Based on this market data: {market_summary}
             
             Generate {count} investment recommendations for someone new to crypto trading.
+            Use ONLY these symbols: {', '.join([item.get('symbol', '') for item in top_universe])}
             For each recommendation, provide:
             1. Symbol (BTC, ETH, etc.)
             2. Entry reason (e.g., 'strong uptrend', 'stable performer')
@@ -2493,13 +2654,33 @@ async def get_ai_recommendations(
                     json_match = re.search(r'\[.*\]', ai_response, re.DOTALL)
                     if json_match:
                         recommendations = json.loads(json_match.group())
+                        if top_universe_symbols:
+                            recommendations = [
+                                rec for rec in recommendations
+                                if str(rec.get("symbol", "")).upper() in top_universe_symbols
+                            ]
             except Exception as e:
                 logger.warning(f"AI recommendation failed, using pattern matching: {e}")
         
         # Fallback: Pattern matching recommendations based on trends
         if not recommendations:
+            universe_rank = {
+                entry.get("crypto_id"): idx
+                for idx, entry in enumerate(top_universe)
+                if entry.get("crypto_id")
+            }
+
+            if top_universe_ids:
+                trends = [trend for trend in trends if trend.get("crypto_id") in set(top_universe_ids)]
+
             # Sort trends by performance
-            sorted_trends = sorted(trends, key=lambda x: x.get('price_change_percent', 0), reverse=True)
+            sorted_trends = sorted(
+                trends,
+                key=lambda x: (
+                    universe_rank.get(x.get("crypto_id"), 999),
+                    -float(x.get('price_change_percent', 0) or 0)
+                )
+            )
             
             risk_levels = ["LOW", "MEDIUM", "HIGH"]
             base_allocation = 100 / count
@@ -2517,7 +2698,9 @@ async def get_ai_recommendations(
                     risk = "HIGH"
                     risk_description = "high volatility offering potential for significant gains"
                 
-                symbol = trend.get('crypto_id', '').upper()
+                trend_id = trend.get('crypto_id', '')
+                mapped_entry = next((entry for entry in top_universe if entry.get("crypto_id") == trend_id), None)
+                symbol = str((mapped_entry or {}).get("symbol") or trend_id).upper()
                 trend_type = trend.get('trend', 'NEUTRAL')
                 price_change = trend.get('price_change_percent', 0)
                 
@@ -2613,7 +2796,8 @@ async def get_ai_recommendations(
         else:
             overall_risk = "LOW"
         
-        reasoning = f"Based on {strategy.capitalize()} strategy over {timePeriod} period analyzing {len(df['id'].unique())} cryptocurrencies. " \
+        universe_size = len(top_universe_ids) if top_universe_ids else len(scoped_df['id'].unique())
+        reasoning = f"Based on {strategy.capitalize()} strategy over {timePeriod} period analyzing a multi-API top universe of {universe_size} cryptocurrencies. " \
                    f"Recommendations include a mix of stable and growth-oriented assets. " \
                    f"Diversification suggested across up to {count} assets."
 
@@ -2651,6 +2835,7 @@ async def get_ai_recommendations(
             "recommendations": recommendations[:count],
             "reasoning": reasoning,
             "risk_level": overall_risk,
+            "candidate_universe": top_universe,
             "timestamp": datetime.now(),
             "tier": subscription_tier,
             "limit_applied": tier_limit,
