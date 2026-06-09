@@ -348,6 +348,38 @@
   z-index: 1;
 }
 
+.profit-breakdown-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.profit-breakdown-badge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e3f2fd;
+}
+
+.profit-breakdown-badge.positive {
+  border-color: rgba(76, 175, 80, 0.5);
+  background: rgba(76, 175, 80, 0.2);
+  color: #c8e6c9;
+}
+
+.profit-breakdown-badge.negative {
+  border-color: rgba(244, 67, 54, 0.5);
+  background: rgba(244, 67, 54, 0.18);
+  color: #ffcdd2;
+}
+
 .profit-card.negative .profit-percentage {
   color: #f44336;
 }

@@ -139,6 +139,41 @@ const getHoldingCostBasis = (holding) => {
   return Math.max(...candidates)
 }
 
+const getScopedRealizedProfit = (portfolio, investmentType) => {
+  const realized = portfolio?.realized_pnl || {}
+
+  if (investmentType === 'fake') {
+    return Number(realized.fake_money || 0)
+  }
+
+  if (investmentType === 'real') {
+    return Number(realized.real_money || 0)
+  }
+
+  return Number(realized.overall || 0)
+}
+
+const getScopedRealizedCostBasis = (portfolio, investmentType) => {
+  const activityLog = Array.isArray(portfolio?.activity_log) ? portfolio.activity_log : []
+
+  return activityLog.reduce((sum, entry) => {
+    if (entry?.event !== 'sell') {
+      return sum
+    }
+
+    const type = String(entry?.investment_type || 'real_money')
+    const shouldInclude = investmentType === 'all'
+      || (investmentType === 'fake' && type === 'fake_money')
+      || (investmentType === 'real' && type === 'real_money')
+
+    if (!shouldInclude) {
+      return sum
+    }
+
+    return sum + Number(entry?.cost_basis || 0)
+  }, 0)
+}
+
 export default function UserInvestmentsPanel() {
   const navigate = useNavigate()
   const [portfolio, setPortfolio] = useState(null)
@@ -573,9 +608,13 @@ export default function UserInvestmentsPanel() {
   const allProfitData = calculateProfitData(holdings)
   const filteredProfitData = calculateProfitData(filteredHoldings)
   const scopedProfitData = investmentType === 'all' ? allProfitData : filteredProfitData
-  const totalProfit = getTotalProfit(scopedProfitData)
+  const unrealizedProfit = getTotalProfit(scopedProfitData)
+  const realizedProfit = getScopedRealizedProfit(portfolio, investmentType)
+  const totalProfit = unrealizedProfit + realizedProfit
   const totalInvested = scopedProfitData.reduce((sum, item) => sum + item.investmentValue, 0)
-  const totalProfitPercentage = getTotalProfitPercentage(scopedProfitData, totalInvested)
+  const realizedCostBasis = getScopedRealizedCostBasis(portfolio, investmentType)
+  const totalTrackedCostBasis = totalInvested + realizedCostBasis
+  const totalProfitPercentage = totalTrackedCostBasis > 0 ? (totalProfit / totalTrackedCostBasis) * 100 : 0
   const scopedCurrentValue = scopedProfitData.reduce((sum, item) => sum + item.currentValue, 0)
   const profitByType = getProfitByType(allProfitData)
   const profitScopeLabel = investmentType === 'all'
@@ -627,8 +666,8 @@ export default function UserInvestmentsPanel() {
     : null
 
   const profitNarrative = totalProfit >= 0
-    ? `${profitScopeLabel} positions are currently in unrealized gain by ${totalProfit.toFixed(2)} USD.`
-    : `${profitScopeLabel} positions are currently in unrealized loss by ${Math.abs(totalProfit).toFixed(2)} USD.`
+    ? `${profitScopeLabel} total P&L is up ${totalProfit.toFixed(2)} USD (${unrealizedProfit.toFixed(2)} unrealized, ${realizedProfit.toFixed(2)} realized).`
+    : `${profitScopeLabel} total P&L is down ${Math.abs(totalProfit).toFixed(2)} USD (${unrealizedProfit.toFixed(2)} unrealized, ${realizedProfit.toFixed(2)} realized).`
 
   return (
     <div className="user-investments-panel">
@@ -723,6 +762,14 @@ export default function UserInvestmentsPanel() {
         <div className={`profit-card ${totalProfit >= 0 ? 'positive' : 'negative'}`}>
           <div className="profit-amount">{totalProfit >= 0 ? '+' : ''}{totalProfit.toFixed(2)} USD</div>
           <div className="profit-percentage">{totalProfitPercentage >= 0 ? '+' : ''}{totalProfitPercentage.toFixed(2)}%</div>
+          <div className="profit-breakdown-badges">
+            <span className={`profit-breakdown-badge ${unrealizedProfit >= 0 ? 'positive' : 'negative'}`}>
+              Unrealized: {unrealizedProfit >= 0 ? '+' : ''}{unrealizedProfit.toFixed(2)} USD
+            </span>
+            <span className={`profit-breakdown-badge ${realizedProfit >= 0 ? 'positive' : 'negative'}`}>
+              Realized: {realizedProfit >= 0 ? '+' : ''}{realizedProfit.toFixed(2)} USD
+            </span>
+          </div>
           <div className="profit-emoji">{totalProfit >= 0 ? '📈' : '📉'}</div>
         </div>
 
@@ -734,6 +781,10 @@ export default function UserInvestmentsPanel() {
             <div className="explainer-item">
               <span className="explainer-label">Cost Basis</span>
               <span className="explainer-value">${totalInvested.toFixed(2)}</span>
+            </div>
+            <div className="explainer-item">
+              <span className="explainer-label">Realized Cost Basis</span>
+              <span className="explainer-value">${realizedCostBasis.toFixed(2)}</span>
             </div>
             <div className="explainer-item">
               <span className="explainer-label">Current Market Value</span>

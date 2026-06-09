@@ -3038,10 +3038,12 @@ async def get_user_portfolio_data(current_user: str = Depends(get_current_user))
             elif inv_type == "real_money":
                 real_unrealized += unrealized
         
-        # Update realized_pnl with calculated unrealized gains (until they sell)
-        portfolio["realized_pnl"]["overall"] = total_unrealized
-        portfolio["realized_pnl"]["fake_money"] = fake_unrealized
-        portfolio["realized_pnl"]["real_money"] = real_unrealized
+        # Keep realized P&L as cumulative sell results and expose unrealized separately.
+        portfolio["unrealized_pnl"] = {
+            "overall": total_unrealized,
+            "fake_money": fake_unrealized,
+            "real_money": real_unrealized,
+        }
         
         return portfolio
     
