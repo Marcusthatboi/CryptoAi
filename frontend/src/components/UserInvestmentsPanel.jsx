@@ -722,6 +722,18 @@ export default function UserInvestmentsPanel() {
           <div className="summary-label">Total Withdrawn</div>
           <div className="summary-value">${totalWithdrawn.toFixed(2)}</div>
         </div>
+        <div className="summary-card">
+          <div className="summary-label">Unrealized P&L</div>
+          <div className="summary-value" style={{ color: unrealizedProfit >= 0 ? '#4caf50' : '#f44336' }}>
+            {unrealizedProfit >= 0 ? '+' : ''}{unrealizedProfit.toFixed(2)}
+          </div>
+        </div>
+        <div className="summary-card">
+          <div className="summary-label">Realized P&L</div>
+          <div className="summary-value" style={{ color: realizedProfit >= 0 ? '#4caf50' : '#f44336' }}>
+            {realizedProfit >= 0 ? '+' : ''}{realizedProfit.toFixed(2)}
+          </div>
+        </div>
       </div>
 
       <div className="withdraw-section">
