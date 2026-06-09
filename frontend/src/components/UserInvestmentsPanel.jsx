@@ -11,16 +11,102 @@ import './UserInvestmentsPanel.css'
 const SYMBOL_TO_CRYPTO_ID = {
   BITCOIN: 'bitcoin',
   ETHEREUM: 'ethereum',
+  TETHER: 'tether',
+  BNB: 'binancecoin',
+  USDC: 'usd-coin',
   CARDANO: 'cardano',
   SOLANA: 'solana',
   RIPPLE: 'ripple',
+  TRON: 'tron',
+  TONCOIN: 'toncoin',
   POLKADOT: 'polkadot',
   DOGECOIN: 'dogecoin',
+  'SHIBA INU': 'shiba-inu',
   AVALANCHE: 'avalanche-2',
   CHAINLINK: 'chainlink',
   POLYGON: 'polygon',
   LITECOIN: 'litecoin',
-  UNISWAP: 'uniswap'
+  UNISWAP: 'uniswap',
+  'BITCOIN CASH': 'bitcoin-cash',
+  NEAR: 'near',
+  STELLAR: 'stellar',
+  FILECOIN: 'filecoin',
+  HEDERA: 'hedera-hashgraph',
+  COSMOS: 'cosmos',
+  ALGORAND: 'algorand',
+  APTOS: 'aptos',
+  ARBITRUM: 'arbitrum',
+  OPTIMISM: 'optimism',
+  RENDER: 'render-token',
+  IMX: 'immutable-x'
+}
+
+const SYMBOL_ALIAS_TO_CANONICAL = {
+  BTC: 'BITCOIN',
+  XBT: 'BITCOIN',
+  ETH: 'ETHEREUM',
+  ADA: 'CARDANO',
+  SOL: 'SOLANA',
+  XRP: 'RIPPLE',
+  DOT: 'POLKADOT',
+  DOGE: 'DOGECOIN',
+  AVAX: 'AVALANCHE',
+  LINK: 'CHAINLINK',
+  MATIC: 'POLYGON',
+  LTC: 'LITECOIN',
+  UNI: 'UNISWAP',
+  BCH: 'BITCOIN CASH',
+  XLM: 'STELLAR',
+  FIL: 'FILECOIN',
+  ALGO: 'ALGORAND',
+  APT: 'APTOS',
+  OP: 'OPTIMISM'
+}
+
+const CANONICAL_TO_TICKER = {
+  BITCOIN: 'BTC',
+  ETHEREUM: 'ETH',
+  CARDANO: 'ADA',
+  SOLANA: 'SOL',
+  RIPPLE: 'XRP',
+  POLKADOT: 'DOT',
+  DOGECOIN: 'DOGE',
+  AVALANCHE: 'AVAX',
+  CHAINLINK: 'LINK',
+  POLYGON: 'MATIC',
+  LITECOIN: 'LTC',
+  UNISWAP: 'UNI',
+  'BITCOIN CASH': 'BCH',
+  STELLAR: 'XLM',
+  FILECOIN: 'FIL',
+  ALGORAND: 'ALGO',
+  APTOS: 'APT',
+  OPTIMISM: 'OP'
+}
+
+const normalizeSymbol = (symbol) => {
+  const normalized = String(symbol || '').trim().toUpperCase()
+  if (!normalized) {
+    return ''
+  }
+  return SYMBOL_ALIAS_TO_CANONICAL[normalized] || normalized
+}
+
+const getCryptoIdForSymbol = (symbol) => {
+  const canonicalSymbol = normalizeSymbol(symbol)
+  return SYMBOL_TO_CRYPTO_ID[canonicalSymbol]
+}
+
+const getLivePriceForSymbol = (symbol, livePrices) => {
+  const normalized = String(symbol || '').trim().toUpperCase()
+  const canonical = normalizeSymbol(symbol)
+  const ticker = CANONICAL_TO_TICKER[canonical]
+
+  return Number(
+    livePrices[normalized]?.price
+    ?? livePrices[canonical]?.price
+    ?? (ticker ? livePrices[ticker]?.price : undefined)
+  )
 }
 
 const getHoldingQuantity = (holding) => Number(holding?.quantity || 0)
@@ -104,7 +190,17 @@ export default function UserInvestmentsPanel() {
       return
     }
 
-    const symbols = [...new Set(portfolio.holdings.map((holding) => holding.symbol?.toUpperCase()).filter(Boolean))]
+    const symbols = [
+      ...new Set(
+        portfolio.holdings
+          .map((holding) => String(holding.symbol || '').toUpperCase())
+          .filter(Boolean)
+          .flatMap((symbol) => {
+            const canonical = normalizeSymbol(symbol)
+            return canonical && canonical !== symbol ? [symbol, canonical] : [symbol]
+          })
+      )
+    ]
     symbols.forEach((symbol) => subscribe(symbol))
 
     return () => {
@@ -117,34 +213,52 @@ export default function UserInvestmentsPanel() {
       return
     }
 
+    const normalizedSymbol = String(message.symbol || '').toUpperCase()
+    const canonicalSymbol = normalizeSymbol(normalizedSymbol)
+    const tickerSymbol = CANONICAL_TO_TICKER[canonicalSymbol]
+    const normalizedPrice = Number(message.data?.price)
+    const normalizedData = Number.isFinite(normalizedPrice)
+      ? { ...message.data, price: normalizedPrice }
+      : message.data
+
     setLivePrices((currentPrices) => ({
       ...currentPrices,
-      [message.symbol.toUpperCase()]: message.data
+      [normalizedSymbol]: normalizedData,
+      ...(canonicalSymbol ? { [canonicalSymbol]: normalizedData } : {}),
+      ...(tickerSymbol ? { [tickerSymbol]: normalizedData } : {})
     }))
   }, [message])
 
   const refreshHoldingPrices = async (holdings) => {
     const symbols = [...new Set((holdings || []).map((holding) => holding.symbol?.toUpperCase()).filter(Boolean))]
-    const trackedSymbols = symbols.filter((symbol) => SYMBOL_TO_CRYPTO_ID[symbol])
+    const symbolMappings = symbols
+      .map((symbol) => ({ symbol, cryptoId: getCryptoIdForSymbol(symbol) }))
+      .filter((item) => item.cryptoId)
+    const trackedCryptoIds = [...new Set(symbolMappings.map((item) => item.cryptoId))]
 
-    if (!trackedSymbols.length) {
+    if (!trackedCryptoIds.length) {
       return
     }
 
-    const cryptoIds = trackedSymbols.map((symbol) => SYMBOL_TO_CRYPTO_ID[symbol])
     let response
     try {
-      response = await cryptoAPI.getPrices(cryptoIds)
+      response = await cryptoAPI.getPrices(trackedCryptoIds)
     } catch (priceError) {
       console.warn('Failed to refresh holding prices:', priceError)
       return
     }
 
-    const pricesBySymbol = trackedSymbols.reduce((result, symbol) => {
-      const cryptoId = SYMBOL_TO_CRYPTO_ID[symbol]
+    const pricesBySymbol = symbolMappings.reduce((result, item) => {
+      const { symbol, cryptoId } = item
+      const canonicalSymbol = normalizeSymbol(symbol)
+      const tickerSymbol = CANONICAL_TO_TICKER[canonicalSymbol]
       const priceData = response.data?.[cryptoId]
       if (priceData) {
         result[symbol] = priceData
+        result[canonicalSymbol] = priceData
+        if (tickerSymbol) {
+          result[tickerSymbol] = priceData
+        }
       }
       return result
     }, {})
@@ -278,8 +392,8 @@ export default function UserInvestmentsPanel() {
   const calculateProfitData = (holdings) => {
     return holdings.map(holding => {
       const symbol = holding.symbol?.toUpperCase()
-      const cryptoId = SYMBOL_TO_CRYPTO_ID[symbol] || symbol?.toLowerCase()
-      const livePrice = livePrices[symbol]?.price
+      const cryptoId = getCryptoIdForSymbol(symbol) || symbol?.toLowerCase()
+      const livePrice = getLivePriceForSymbol(symbol, livePrices)
       const currentPrice = Number(livePrice ?? holding.current_price ?? holding.price)
       const quantity = getHoldingQuantity(holding)
       const investmentValue = getHoldingCostBasis(holding)
