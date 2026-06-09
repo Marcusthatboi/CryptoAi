@@ -152,10 +152,21 @@ export default function UserInvestmentsPanel() {
   const [sellPercentByKey, setSellPercentByKey] = useState({})
   const [sellQuantityByKey, setSellQuantityByKey] = useState({})
   const [profitTimeRange, setProfitTimeRange] = useState('7d') // 'd', '7d', '30d'
+  const [practiceLastTickAt, setPracticeLastTickAt] = useState(null)
   const isRefreshingRef = useRef(false)
   const isMountedRef = useRef(true)
   const { isConnected, message, subscribe, unsubscribe } = useWebSocket()
   const holdingsSymbolKey = [...new Set((portfolio?.holdings || []).map((holding) => holding.symbol?.toUpperCase()).filter(Boolean))]
+    .sort()
+    .join(',')
+  const practiceSymbolKey = [
+    ...new Set(
+      (portfolio?.holdings || [])
+        .filter((holding) => holding.investment_type === 'fake_money')
+        .map((holding) => normalizeSymbol(holding.symbol))
+        .filter(Boolean)
+    )
+  ]
     .sort()
     .join(',')
 
@@ -220,6 +231,10 @@ export default function UserInvestmentsPanel() {
     const normalizedData = Number.isFinite(normalizedPrice)
       ? { ...message.data, price: normalizedPrice }
       : message.data
+    const practiceSymbols = practiceSymbolKey ? new Set(practiceSymbolKey.split(',')) : null
+    const isPracticeTick = Boolean(
+      practiceSymbols && (practiceSymbols.has(normalizedSymbol) || practiceSymbols.has(canonicalSymbol))
+    )
 
     setLivePrices((currentPrices) => ({
       ...currentPrices,
@@ -227,7 +242,11 @@ export default function UserInvestmentsPanel() {
       ...(canonicalSymbol ? { [canonicalSymbol]: normalizedData } : {}),
       ...(tickerSymbol ? { [tickerSymbol]: normalizedData } : {})
     }))
-  }, [message])
+
+    if (isPracticeTick) {
+      setPracticeLastTickAt(normalizedData?.timestamp || new Date().toISOString())
+    }
+  }, [message, practiceSymbolKey])
 
   const refreshHoldingPrices = async (holdings) => {
     const symbols = [...new Set((holdings || []).map((holding) => holding.symbol?.toUpperCase()).filter(Boolean))]
@@ -268,6 +287,11 @@ export default function UserInvestmentsPanel() {
         ...currentPrices,
         ...pricesBySymbol
       }))
+
+      const hasPracticeHoldings = (holdings || []).some((holding) => holding.investment_type === 'fake_money')
+      if (hasPracticeHoldings) {
+        setPracticeLastTickAt(new Date().toISOString())
+      }
     }
   }
 
@@ -688,6 +712,14 @@ export default function UserInvestmentsPanel() {
       {/* Profit Visualization Section */}
       <div className="profit-summary">
         <h3>📊 {profitScopeLabel} Profit/Loss</h3>
+        <div className={`practice-tick ${isConnected ? 'live' : 'polling'}`}>
+          <span className="practice-tick-label">Practice Tick</span>
+          <span className="practice-tick-value">
+            {practiceLastTickAt
+              ? new Date(practiceLastTickAt).toLocaleTimeString()
+              : 'Waiting for live practice updates'}
+          </span>
+        </div>
         <div className={`profit-card ${totalProfit >= 0 ? 'positive' : 'negative'}`}>
           <div className="profit-amount">{totalProfit >= 0 ? '+' : ''}{totalProfit.toFixed(2)} USD</div>
           <div className="profit-percentage">{totalProfitPercentage >= 0 ? '+' : ''}{totalProfitPercentage.toFixed(2)}%</div>
