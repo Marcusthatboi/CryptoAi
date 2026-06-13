@@ -12,7 +12,10 @@
   }
 
   @service_worker path /sw.js
-  header @service_worker Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+  header @service_worker Cache-Control "no-store, no-cache, must-revalidate, max-age=0, s-maxage=0"
+  header @service_worker Pragma "no-cache"
+  header @service_worker Expires "0"
+  header @service_worker Surrogate-Control "no-store"
   header @service_worker CDN-Cache-Control "no-store"
   header @service_worker Cloudflare-CDN-Cache-Control "no-store"
 
@@ -21,6 +24,14 @@
 
 {$API_DOMAIN} {
   encode zstd gzip
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+  }
 
   @cors_allowed header Origin https://dacryptobeast.com https://www.dacryptobeast.com
   @cors_preflight {
