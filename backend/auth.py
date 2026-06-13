@@ -56,6 +56,15 @@ def has_weak_secret_key() -> bool:
     lowered = value.lower()
     return any(token in lowered for token in ["replace", "changeme", "todo", "secret-key"])
 
+
+def should_force_password_change(user: Optional[Dict[str, Any]]) -> bool:
+    """Flag accounts that must rotate credentials before continuing."""
+    record = user or {}
+    if not isinstance(record, dict):
+        return False
+
+    return bool(record.get("force_password_change") or record.get("password_change_required"))
+
 # Password hashing: keep Argon2 for stronger new hashes while verifying legacy PBKDF2.
 pwd_context = CryptContext(schemes=["argon2", "pbkdf2_sha256"], deprecated="auto")
 
