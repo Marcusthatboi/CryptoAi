@@ -324,6 +324,7 @@ rate_limit_lock = asyncio.Lock()
 
 PRICE_CACHE_TTL_SECONDS = int(os.getenv("PRICE_CACHE_TTL_SECONDS", "20"))
 PRICE_STALE_FALLBACK_SECONDS = int(os.getenv("PRICE_STALE_FALLBACK_SECONDS", "300"))
+PRICE_HARD_FALLBACK_SECONDS = int(os.getenv("PRICE_HARD_FALLBACK_SECONDS", "21600"))
 price_cache_lock = asyncio.Lock()
 single_price_cache: Dict[str, Dict[str, Any]] = {}
 batch_price_cache: Dict[Tuple[str, Tuple[str, ...]], Dict[str, Any]] = {}
@@ -353,6 +354,10 @@ def _is_cache_within_stale_fallback(timestamp_value: float) -> bool:
     return (time.monotonic() - timestamp_value) <= PRICE_STALE_FALLBACK_SECONDS
 
 
+def _is_cache_within_hard_fallback(timestamp_value: float) -> bool:
+    return (time.monotonic() - timestamp_value) <= PRICE_HARD_FALLBACK_SECONDS
+
+
 async def get_single_price_with_cache(crypto_id: str, vs_currency: str = "usd") -> Optional[Dict[str, Any]]:
     """Fetch single price using short-lived cache and stale fallback on upstream failures."""
     normalized_id = str(crypto_id or "").strip().lower()
@@ -376,6 +381,10 @@ async def get_single_price_with_cache(crypto_id: str, vs_currency: str = "usd") 
     async with price_cache_lock:
         cached = single_price_cache.get(normalized_id)
         if cached and _is_cache_within_stale_fallback(cached.get("timestamp", 0)):
+            return dict(cached.get("data") or {})
+
+        # Last-resort resilience for temporary provider outages/rate-limits.
+        if cached and _is_cache_within_hard_fallback(cached.get("timestamp", 0)):
             return dict(cached.get("data") or {})
 
     return None
@@ -423,10 +432,15 @@ async def get_multiple_prices_with_cache(crypto_ids: List[str], vs_currency: str
         if cached_batch and _is_cache_within_stale_fallback(cached_batch.get("timestamp", 0)):
             return dict(cached_batch.get("data") or {})
 
+        if cached_batch and _is_cache_within_hard_fallback(cached_batch.get("timestamp", 0)):
+            return dict(cached_batch.get("data") or {})
+
         fallback = {}
         for asset_id in normalized_ids:
             cached_single = single_price_cache.get(asset_id)
             if cached_single and _is_cache_within_stale_fallback(cached_single.get("timestamp", 0)):
+                fallback[asset_id] = dict(cached_single.get("data") or {})
+            elif cached_single and _is_cache_within_hard_fallback(cached_single.get("timestamp", 0)):
                 fallback[asset_id] = dict(cached_single.get("data") or {})
 
     return fallback
