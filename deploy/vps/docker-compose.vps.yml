@@ -15,7 +15,8 @@ services:
     depends_on:
       - mongo
     env_file:
-      - .env.vps
+      - path: .env.vps
+        format: raw
     environment:
       MONGODB_URL: mongodb://mongo:27017
       DB_NAME: ${DB_NAME:-cryptoai}
@@ -58,7 +59,8 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     env_file:
-      - .env.vps
+      - path: .env.vps
+        format: raw
     networks:
       - cryptoai_net
 
