@@ -10,6 +10,10 @@
     X-Frame-Options "SAMEORIGIN"
     Referrer-Policy "strict-origin-when-cross-origin"
   }
+
+  @service_worker path /sw.js
+  header @service_worker Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+
   reverse_proxy frontend:8080
 }
 
