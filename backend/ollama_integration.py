@@ -157,6 +157,79 @@ def _build_context_string(crypto_context: Dict) -> str:
 
     if crypto_context.get('holdings_summary'):
         lines.append(f"- Holdings Summary: {'; '.join(crypto_context['holdings_summary'])}")
+
+    if crypto_context.get('total_cost_basis') is not None:
+        lines.append(f"- Total Cost Basis: ${float(crypto_context['total_cost_basis']):,.2f}")
+
+    if crypto_context.get('unrealized_pnl_overall') is not None:
+        lines.append(f"- Unrealized P&L: ${float(crypto_context['unrealized_pnl_overall']):+,.2f}")
+
+    if crypto_context.get('realized_pnl_overall') is not None:
+        lines.append(f"- Realized P&L: ${float(crypto_context['realized_pnl_overall']):+,.2f}")
+
+    if crypto_context.get('net_pnl_overall') is not None:
+        lines.append(f"- Net P&L: ${float(crypto_context['net_pnl_overall']):+,.2f}")
+
+    if crypto_context.get('portfolio_numbers_bridge'):
+        lines.append(f"- Portfolio Numbers Bridge: {crypto_context['portfolio_numbers_bridge']}")
+
+    detailed_holdings = crypto_context.get('holdings_detailed') or []
+    if detailed_holdings:
+        snippets = []
+        for holding in detailed_holdings[:5]:
+            symbol = str(holding.get('symbol', 'UNKNOWN')).upper()
+            qty = float(holding.get('quantity', 0) or 0)
+            avg = float(holding.get('average_price', 0) or 0)
+            current = float(holding.get('current_price', 0) or 0)
+            pnl = float(holding.get('unrealized_pnl', 0) or 0)
+            snippets.append(f"{symbol}(qty={qty:.6g}, avg=${avg:,.2f}, current=${current:,.2f}, pnl={pnl:+,.2f})")
+        lines.append(f"- Holdings Detailed: {'; '.join(snippets)}")
+
+    news_context = crypto_context.get('news_context') or {}
+    if news_context.get('available'):
+        sentiment = news_context.get('sentiment') or {}
+        lines.append(
+            f"- News Sentiment ({news_context.get('provider', 'unknown')}): "
+            f"{str(sentiment.get('label', 'neutral')).upper()} "
+            f"(score={sentiment.get('score', 0)}, samples={sentiment.get('samples', 0)})"
+        )
+        headlines = news_context.get('headlines') or []
+        if headlines:
+            lines.append(f"- Top Headlines: {' | '.join(headlines[:3])}")
+
+    onchain_context = crypto_context.get('onchain_context') or {}
+    if onchain_context.get('available'):
+        metrics = onchain_context.get('metrics') or {}
+        metric_parts = []
+        for crypto_id, values in metrics.items():
+            active_addresses = float(values.get('active_addresses_24h', 0) or 0)
+            metric_parts.append(f"{str(crypto_id).upper()} active_addresses_24h={active_addresses:,.0f}")
+        if metric_parts:
+            lines.append(
+                f"- On-chain Metrics ({onchain_context.get('provider', 'unknown')}): "
+                f"{'; '.join(metric_parts)}"
+            )
+
+    exchange_context = crypto_context.get('exchange_context') or {}
+    if exchange_context:
+        lines.append(f"- Connected Exchanges: {exchange_context.get('connected_exchanges', 0)}")
+
+        alpaca = exchange_context.get('alpaca') or {}
+        if alpaca.get('connected'):
+            lines.append(
+                f"- Alpaca: equity=${float(alpaca.get('equity', 0) or 0):,.2f}, "
+                f"cash=${float(alpaca.get('cash', 0) or 0):,.2f}, "
+                f"buying_power=${float(alpaca.get('buying_power', 0) or 0):,.2f}, "
+                f"holdings={int(alpaca.get('holdings_count', 0) or 0)}"
+            )
+
+        binance = exchange_context.get('binance') or {}
+        if binance.get('connected'):
+            lines.append(
+                f"- Binance: portfolio_value_usdt=${float(binance.get('portfolio_value_usdt', 0) or 0):,.2f}, "
+                f"positions={int(binance.get('positions_count', 0) or 0)}, "
+                f"non_zero_balances={int(binance.get('non_zero_balances', 0) or 0)}"
+            )
     
     if crypto_context.get('current_price'):
         lines.append(f"- Current Price: ${crypto_context['current_price']:,.2f}")

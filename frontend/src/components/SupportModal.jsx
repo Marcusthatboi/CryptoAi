@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { cryptoAPI } from '../utils/api'
+import { API_BASE } from '../utils/backendConfig'
 import './SupportModal.css'
 
 const ISSUE_CATEGORIES = [
@@ -25,7 +26,6 @@ const buildDiagnosticsText = ({ user, category }) => {
   const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
   const language = typeof navigator !== 'undefined' ? navigator.language : 'unknown'
   const currentUrl = typeof window !== 'undefined' ? window.location.href : 'unknown'
-  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
 
   return [
     'Auto Diagnostics',
@@ -35,7 +35,7 @@ const buildDiagnosticsText = ({ user, category }) => {
     `- Username: ${user?.username || 'unknown'}`,
     `- User ID: ${user?.user_id || 'unknown'}`,
     `- Role: ${user?.role || 'unknown'}`,
-    `- API Base: ${apiBase}`,
+    `- API Base: ${API_BASE}`,
     `- Current URL: ${currentUrl}`,
     `- Browser Language: ${language}`,
     `- Browser Online: ${onlineStatus}`,

@@ -84,6 +84,8 @@ const CANONICAL_TO_TICKER = {
   OPTIMISM: 'OP'
 }
 
+const PORTFOLIO_FETCH_TIMEOUT_MS = 35000
+
 const normalizeSymbol = (symbol) => {
   const normalized = String(symbol || '').trim().toUpperCase()
   if (!normalized) {
@@ -117,26 +119,23 @@ const getHoldingCostBasis = (holding) => {
   const totalValue = Number(holding?.total_value)
   const entryPrice = Number(holding?.price)
 
-  const candidates = []
-
-  if (Number.isFinite(averagePrice) && averagePrice > 0 && quantity > 0) {
-    candidates.push(quantity * averagePrice)
-  }
-
-  if (Number.isFinite(totalValue) && totalValue > 0) {
-    candidates.push(totalValue)
-  }
-
-  if (Number.isFinite(entryPrice) && entryPrice > 0 && quantity > 0) {
-    candidates.push(quantity * entryPrice)
-  }
-
-  if (!candidates.length) {
+  if (!(Number.isFinite(quantity) && quantity > 0)) {
     return 0
   }
 
-  // Use the highest credible principal to avoid overstated profit on legacy corrupted holdings.
-  return Math.max(...candidates)
+  if (Number.isFinite(averagePrice) && averagePrice > 0) {
+    return quantity * averagePrice
+  }
+
+  if (Number.isFinite(totalValue) && totalValue > 0) {
+    return totalValue
+  }
+
+  if (Number.isFinite(entryPrice) && entryPrice > 0) {
+    return quantity * entryPrice
+  }
+
+  return 0
 }
 
 const getScopedRealizedProfit = (portfolio, investmentType) => {
@@ -338,7 +337,10 @@ export default function UserInvestmentsPanel() {
     isRefreshingRef.current = true
 
     try {
-      const response = await cryptoAPI.getUserPortfolio({ timeout: 10000 })
+      const response = await cryptoAPI.getUserPortfolio({
+        timeout: PORTFOLIO_FETCH_TIMEOUT_MS,
+        retryAttempts: 1
+      })
 
       if (!isMountedRef.current) {
         return
@@ -357,7 +359,15 @@ export default function UserInvestmentsPanel() {
       }
 
       if (!portfolio) {
-        setError('Failed to load portfolio')
+        const isTimeout =
+          err?.code === 'ECONNABORTED' ||
+          String(err?.message || '').toLowerCase().includes('timeout')
+
+        setError(
+          isTimeout
+            ? 'Portfolio request timed out. Please retry in a moment.'
+            : 'Failed to load portfolio'
+        )
       }
     } finally {
       isRefreshingRef.current = false
@@ -475,47 +485,54 @@ export default function UserInvestmentsPanel() {
     })
   }
 
-  const generateProfitHistory = (timeRange, totalProfit) => {
-    let days = 0
-    let label = ''
-    
-    if (timeRange === 'd') {
-      days = 1
-      label = '24 Hours'
-    } else if (timeRange === '7d') {
-      days = 7
-      label = '7 Days'
-    } else if (timeRange === '30d') {
-      days = 30
-      label = '30 Days'
-    }
-
-    const data = []
+  const generateProfitHistory = (timeRange, totalProfit, portfolioData) => {
     const now = new Date()
-    const startDate = new Date(now)
-    startDate.setDate(startDate.getDate() - days)
+    const dayMap = { d: 1, '7d': 7, '30d': 30 }
+    const labelMap = { d: '24 Hours', '7d': '7 Days', '30d': '30 Days' }
+    const days = dayMap[timeRange] || 7
+    const label = labelMap[timeRange] || '7 Days'
+    const startTime = now.getTime() - (days * 24 * 60 * 60 * 1000)
 
-    // Generate historical data with realistic profit progression
-    const dataPoints = days === 1 ? 24 : days
-    for (let i = 0; i <= dataPoints; i++) {
-      const date = new Date(startDate)
-      date.setHours(date.getHours() + (days === 1 ? i : Math.floor((i / dataPoints) * days * 24)))
-      
-      // Simulate profit growth with some volatility
-      const progress = i / dataPoints
-      const baseProfit = totalProfit * progress
-      const volatility = (Math.random() - 0.5) * (totalProfit * 0.15) // ±15% volatility
-      const profit = baseProfit + volatility
+    const activityLog = Array.isArray(portfolioData?.activity_log) ? portfolioData.activity_log : []
+    const realizedEvents = activityLog
+      .filter((entry) => entry?.event === 'sell')
+      .map((entry) => {
+        const timestampMs = Date.parse(entry?.timestamp || '')
+        return {
+          timestampMs,
+          realizedProfit: Number(entry?.realized_profit || 0)
+        }
+      })
+      .filter((entry) => Number.isFinite(entry.timestampMs))
+      .sort((a, b) => a.timestampMs - b.timestampMs)
 
-      const dateStr = days === 1 
-        ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
-        : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const pointCount = days === 1 ? 24 : days
+    const data = []
+
+    for (let i = 0; i <= pointCount; i++) {
+      const pointTime = startTime + ((now.getTime() - startTime) * (i / pointCount))
+      const realizedToPoint = realizedEvents
+        .filter((entry) => entry.timestampMs <= pointTime)
+        .reduce((sum, entry) => sum + entry.realizedProfit, 0)
+
+      const progress = i / pointCount
+      const interpolatedTotal = totalProfit * progress
+      const pointProfit = (interpolatedTotal * 0.65) + (realizedToPoint * 0.35)
+      const pointDate = new Date(pointTime)
+
+      const dateStr = days === 1
+        ? pointDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+        : pointDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
       data.push({
         name: dateStr,
-        profit: parseFloat(profit.toFixed(2)),
-        timestamp: date.getTime()
+        profit: Number(pointProfit.toFixed(2)),
+        timestamp: pointTime
       })
+    }
+
+    if (data.length) {
+      data[data.length - 1].profit = Number(totalProfit.toFixed(2))
     }
 
     return { data, label }
@@ -623,9 +640,11 @@ export default function UserInvestmentsPanel() {
       ? 'Practice Money'
       : 'Real Money'
 
-  const scopedPortfolioValue = investmentType === 'real'
-    ? scopedCurrentValue
-    : Number(portfolio.cash || 0) + scopedCurrentValue
+  const scopedPortfolioValue = investmentType === 'all'
+    ? Number(portfolio.cash || 0) + Number(portfolio.personal_buying_power || 0) + scopedCurrentValue
+    : investmentType === 'real'
+      ? Number(portfolio.personal_buying_power || 0) + scopedCurrentValue
+      : Number(portfolio.cash || 0) + scopedCurrentValue
   const personalBuyingPower = Number(portfolio.personal_buying_power || 0)
   const totalWithdrawn = (portfolio.withdrawals || []).reduce((sum, item) => sum + Number(item?.amount || 0), 0)
 
@@ -646,13 +665,15 @@ export default function UserInvestmentsPanel() {
   const chartData = [
     {
       name: 'Practice Money',
-      profit: profitByType.fake.profit
+      profit: profitByType.fake.profit + Number(portfolio?.realized_pnl?.fake_money || 0)
     },
     {
       name: 'Real Money',
-      profit: profitByType.real.profit
+      profit: profitByType.real.profit + Number(portfolio?.realized_pnl?.real_money || 0)
     }
   ].filter(item => item.profit !== 0)
+
+  const { data: profitHistory, label: rangeLabel } = generateProfitHistory(profitTimeRange, totalProfit, portfolio)
 
   const positivePositions = scopedProfitData.filter((item) => item.profitLoss > 0)
   const negativePositions = scopedProfitData.filter((item) => item.profitLoss < 0)
@@ -882,7 +903,7 @@ export default function UserInvestmentsPanel() {
                   <span className="metric-live-badge">🔴 LIVE</span>
                 </div>
                 <div className="metric-value" style={{color: '#ffc107'}}>
-                  ${(totalInvested + totalProfit).toFixed(2)}
+                  ${scopedPortfolioValue.toFixed(2)}
                 </div>
               </div>
               <div className="metric-box live-metric">
@@ -896,36 +917,31 @@ export default function UserInvestmentsPanel() {
               </div>
             </div>
             
-            {(() => {
-              const { data: profitHistory, label: rangeLabel } = generateProfitHistory(profitTimeRange, totalProfit)
-              return (
-                <div>
-                  <div className="profit-chart-label">{rangeLabel} Profit Progress</div>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={profitHistory} margin={{ top: 20, right: 30, left: 0, bottom: 20 }} isAnimationActive={true}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                      <XAxis dataKey="name" stroke="#888" fontSize={12} />
-                      <YAxis stroke="#888" />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #ffc107' }}
-                        formatter={(value) => `$${value.toFixed(2)}`}
-                      />
-                      <Legend />
-                      <Line 
-                        type="monotone" 
-                        dataKey="profit" 
-                        stroke={totalProfit >= 0 ? '#4caf50' : '#f44336'} 
-                        strokeWidth={3} 
-                        dot={{ fill: totalProfit >= 0 ? '#4caf50' : '#f44336', r: 5 }} 
-                        activeDot={{ r: 8 }} 
-                        animationDuration={300}
-                        name="Profit"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              )
-            })()}
+            <div>
+              <div className="profit-chart-label">{rangeLabel} Profit Progress</div>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={profitHistory} margin={{ top: 20, right: 30, left: 0, bottom: 20 }} isAnimationActive={true}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                  <XAxis dataKey="name" stroke="#888" fontSize={12} />
+                  <YAxis stroke="#888" />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #ffc107' }}
+                    formatter={(value) => `$${Number(value || 0).toFixed(2)}`}
+                  />
+                  <Legend />
+                  <Line 
+                    type="monotone" 
+                    dataKey="profit" 
+                    stroke={totalProfit >= 0 ? '#4caf50' : '#f44336'} 
+                    strokeWidth={3} 
+                    dot={{ fill: totalProfit >= 0 ? '#4caf50' : '#f44336', r: 5 }} 
+                    activeDot={{ r: 8 }} 
+                    animationDuration={300}
+                    name="Profit"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         )}
 

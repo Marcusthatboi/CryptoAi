@@ -20,6 +20,7 @@ import asyncio
 import json
 import math
 import pandas as pd
+import requests
 import time
 from collections import defaultdict, deque
 from urllib.parse import urlsplit
@@ -49,6 +50,7 @@ from backend.ollama_integration import (
     check_ollama_health,
     list_available_models,
     switch_model,
+    load_system_prompt,
 )
 
 from backend.alpaca_api import (
@@ -88,9 +90,12 @@ from backend.websocket_manager import manager
 from backend.data_service import data_service
 from backend.multi_source_data import data_manager, DATA_DIR, ALPHA_VANTAGE_API_KEY
 from backend.routers.system_routes import router as system_router
+from backend.ads import router as ads_router
 from backend.routers.auth_routes import create_auth_router
 from backend.routers.auto_trading_routes import create_auto_trading_router
 from backend.routers.auto_trading_coin_routes import create_auto_trading_coin_router
+from backend.routers.email_verification_routes import create_email_verification_router
+from backend.routers.promo_routes import create_promo_router
 from backend.auth import (
     UserRegister,
     UserLogin,
@@ -168,6 +173,11 @@ DEFAULT_DEV_CORS_ORIGINS = [
     "http://127.0.0.1:8080",
 ]
 
+DEFAULT_PUBLIC_CORS_ORIGINS = [
+    "https://dacryptobeast.com",
+    "https://www.dacryptobeast.com",
+]
+
 
 def _normalize_origin(origin: str) -> str:
     value = str(origin or "").strip()
@@ -183,11 +193,22 @@ def _normalize_origin(origin: str) -> str:
 
 def _load_allowed_origins() -> List[str]:
     configured = os.getenv("FRONTEND_ALLOWED_ORIGINS", "")
-    if configured.strip():
-        origins = [_normalize_origin(item) for item in configured.split(",")]
-        return [origin for origin in origins if origin]
+    base_origins = list(DEFAULT_DEV_CORS_ORIGINS) + list(DEFAULT_PUBLIC_CORS_ORIGINS)
 
-    return list(DEFAULT_DEV_CORS_ORIGINS)
+    if configured.strip():
+        configured_origins = [_normalize_origin(item) for item in configured.split(",")]
+        merged = base_origins + [origin for origin in configured_origins if origin]
+        deduped = []
+        seen = set()
+        for origin in merged:
+            normalized = _normalize_origin(origin)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(normalized)
+        return deduped
+
+    return base_origins
 
 
 ALLOWED_CORS_ORIGINS = _load_allowed_origins()
@@ -410,6 +431,59 @@ async def get_multiple_prices_with_cache(crypto_ids: List[str], vs_currency: str
     return fallback
 
 
+def _fetch_provider_live_price(crypto_id: str, source: str = "auto") -> Optional[Dict[str, Any]]:
+    """Fetch a live quote from Binance/Alpaca for a CoinGecko-style crypto id."""
+    normalized_id = str(crypto_id or "").strip().lower()
+    if not normalized_id:
+        return None
+
+    preferred_source = str(source or "auto").strip().lower()
+    symbol = _crypto_id_to_symbol(normalized_id)
+    if not symbol:
+        return None
+
+    providers: List[str]
+    if preferred_source in {"binance", "alpaca"}:
+        providers = [preferred_source]
+    else:
+        providers = ["binance", "alpaca"]
+
+    for provider in providers:
+        if provider == "binance":
+            try:
+                ticker = get_ticker(f"{symbol}USDT")
+                live_price = float(ticker.get("price") or 0)
+                if live_price > 0:
+                    return {
+                        "id": normalized_id,
+                        "price": live_price,
+                        "market_cap": None,
+                        "volume_24h": float(ticker.get("quote_volume") or ticker.get("volume") or 0),
+                        "price_change_24h": float(ticker.get("price_change_percent") or 0),
+                    }
+            except Exception as exc:
+                logger.debug(f"Binance live quote unavailable for {normalized_id}: {exc}")
+
+        if provider == "alpaca":
+            try:
+                if not is_authenticated():
+                    continue
+                quote = get_crypto_quote(symbol)
+                live_price = float(quote.get("last_price") or quote.get("ask") or quote.get("bid") or 0)
+                if live_price > 0:
+                    return {
+                        "id": normalized_id,
+                        "price": live_price,
+                        "market_cap": None,
+                        "volume_24h": None,
+                        "price_change_24h": None,
+                    }
+            except Exception as exc:
+                logger.debug(f"Alpaca live quote unavailable for {normalized_id}: {exc}")
+
+    return None
+
+
 async def init_usage_counter_collections(db):
     """Initialize usage counter collections with indexes for quota reads/writes."""
     daily_col = db["usage_counters"]
@@ -509,7 +583,7 @@ async def startup_event():
         raise RuntimeError("SECRET_KEY must be at least 32 characters and not placeholder-like in production")
 
     if app_env == "production" and SUBSCRIPTION_AVAILABLE and has_insecure_stripe_config():
-        raise RuntimeError("Stripe keys must be set to real values in production")
+        logger.warning("⚠️ Stripe keys are not fully configured for production; live checkout will stay disabled.")
 
     if has_insecure_secret_key():
         logger.warning("⚠️ Using default SECRET_KEY. Set SECRET_KEY before production deployment.")
@@ -519,6 +593,7 @@ async def startup_event():
 
     if SUBSCRIPTION_AVAILABLE and has_insecure_stripe_config():
         logger.warning("⚠️ Using placeholder Stripe keys. Configure Stripe credentials before production deployment.")
+        logger.warning("⚠️ Live checkout disabled: set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY to valid Stripe keys (test or live) in backend .env.")
 
     if API_DOCS_ENABLED:
         logger.info("ℹ️ API docs are enabled")
@@ -596,6 +671,26 @@ class PriceAlert(BaseModel):
     direction: str
 
 
+class AlertAutoBuyConfigRequest(BaseModel):
+    """Request model for alert auto-buy preferences."""
+    enabled: bool = False
+    direction: str = "down"
+    amount_per_order_usd: float = 50.0
+    max_orders_per_day: int = 3
+    cooldown_minutes: int = 30
+
+
+class AlertAutoBuyConfigResponse(BaseModel):
+    """Response model for alert auto-buy preferences."""
+    enabled: bool
+    direction: str
+    amount_per_order_usd: float
+    max_orders_per_day: int
+    cooldown_minutes: int
+    orders_today: int
+    updated_at: Optional[str] = None
+
+
 class MLDataResponse(BaseModel):
     """Response model for ML data preparation."""
     crypto_id: str
@@ -615,6 +710,18 @@ class ChatResponse(BaseModel):
     """Response model for chat messages."""
     response: str
     timestamp: datetime = None
+
+
+class GrammarRequest(BaseModel):
+    """Request model for text grammar correction."""
+    text: str
+
+
+class GrammarResponse(BaseModel):
+    """Response model for text grammar correction."""
+    original: str
+    corrected: str
+    changed: bool
 
 
 class HealthResponse(BaseModel):
@@ -808,7 +915,7 @@ class BinanceConnectionStatus(BaseModel):
 # ============================================================================
 
 @app.get("/api/price/{crypto_id}", response_model=Optional[PriceData])
-async def get_price(crypto_id: str):
+async def get_price(crypto_id: str, source: str = "auto"):
     """
     Fetch current price for a single cryptocurrency.
     
@@ -822,7 +929,17 @@ async def get_price(crypto_id: str):
         HTTPException: If cryptocurrency not found or API fails
     """
     try:
-        price_data = await get_single_price_with_cache(crypto_id)
+        # Sanitize crypto_id: strip any :quantity notation (e.g., "tether:1" -> "tether")
+        crypto_id = str(crypto_id or "").split(":")[0].strip().lower()
+        
+        source_name = str(source or "auto").strip().lower()
+        price_data = None
+
+        if source_name != "coingecko":
+            price_data = await asyncio.to_thread(_fetch_provider_live_price, crypto_id, source_name)
+
+        if not price_data:
+            price_data = await get_single_price_with_cache(crypto_id)
         
         if not price_data:
             raise HTTPException(
@@ -843,7 +960,7 @@ async def get_price(crypto_id: str):
 
 
 @app.post("/api/prices", response_model=Dict[str, PriceData])
-async def get_prices(crypto_ids: List[str]):
+async def get_prices(crypto_ids: List[str], source: str = "auto"):
     """
     Fetch current prices for multiple cryptocurrencies.
     
@@ -854,7 +971,33 @@ async def get_prices(crypto_ids: List[str]):
         Dictionary mapping crypto_id to PriceData
     """
     try:
-        prices = await get_multiple_prices_with_cache(crypto_ids)
+        source_name = str(source or "auto").strip().lower()
+        normalized_ids = _normalize_crypto_ids(crypto_ids)
+        prices: Dict[str, Dict[str, Any]] = {}
+
+        if source_name != "coingecko" and normalized_ids:
+            tasks = [
+                asyncio.to_thread(_fetch_provider_live_price, crypto_id, source_name)
+                for crypto_id in normalized_ids
+            ]
+            provider_results = await asyncio.gather(*tasks, return_exceptions=True)
+            missing_ids: List[str] = []
+
+            for crypto_id, provider_result in zip(normalized_ids, provider_results):
+                if isinstance(provider_result, Exception):
+                    logger.debug(f"Provider quote failed for {crypto_id}: {provider_result}")
+                    missing_ids.append(crypto_id)
+                    continue
+                if provider_result:
+                    prices[crypto_id] = provider_result
+                else:
+                    missing_ids.append(crypto_id)
+
+            if missing_ids:
+                fallback_prices = await get_multiple_prices_with_cache(missing_ids)
+                prices.update(fallback_prices)
+        else:
+            prices = await get_multiple_prices_with_cache(normalized_ids)
         
         result = {}
         for crypto_id, data in prices.items():
@@ -918,6 +1061,9 @@ async def get_trend_analysis(
         
     Returns:
         TrendAnalysis with trend data and SMA calculations
+        # Sanitize crypto_id: strip any :quantity notation (e.g., "tether:1" -> "tether")
+        crypto_id = str(crypto_id or "").split(":")[0].strip().lower()
+        
     """
     try:
         # Create cache key based on crypto_id and sma_window
@@ -1071,6 +1217,23 @@ async def get_alerts(threshold: float = 5.0, authorization: Optional[str] = Head
             else:
                 await increment_daily_alerts_usage(db, user_id, date_key, delivered_count)
 
+        if alerts:
+            try:
+                await manager.broadcast({
+                    "type": "alert_update",
+                    "data": alerts,
+                    "threshold": threshold,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+            except Exception as broadcast_error:
+                logger.debug(f"Alert broadcast failed: {broadcast_error}")
+
+        if user_id and alerts:
+            try:
+                await execute_alert_auto_buy(db, user_id, alerts)
+            except Exception as auto_buy_error:
+                logger.warning(f"Alert auto-buy execution failed: {auto_buy_error}")
+
         return [PriceAlert(**alert) for alert in alerts]
     
     except HTTPException:
@@ -1080,6 +1243,280 @@ async def get_alerts(threshold: float = 5.0, authorization: Optional[str] = Head
             status_code=500,
             detail=f"Error generating alerts: {str(e)}"
         )
+
+
+def _default_alert_auto_buy_config() -> Dict[str, Any]:
+    return {
+        "enabled": False,
+        "direction": "down",
+        "amount_per_order_usd": 50.0,
+        "max_orders_per_day": 3,
+        "cooldown_minutes": 30,
+        "last_triggered": {},
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+
+
+def _merge_alert_auto_buy_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    merged = _default_alert_auto_buy_config()
+    if isinstance(config, dict):
+        merged.update(config)
+    return merged
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def _count_today_auto_buy_orders(activity_log: List[Dict[str, Any]]) -> int:
+    today_key = _utc_date_key()
+    count = 0
+    for event in activity_log or []:
+        if str(event.get("event", "")) != "auto_buy_alert":
+            continue
+        timestamp_value = str(event.get("timestamp", ""))
+        if timestamp_value.startswith(today_key):
+            count += 1
+    return count
+
+
+def _resolve_alert_symbol(crypto_id: str) -> str:
+    token = str(crypto_id or "").strip().lower()
+    if not token:
+        return "UNKNOWN"
+
+    for symbol, mapped_id in LIVE_PRICE_SYMBOLS.items():
+        if str(mapped_id or "").strip().lower() == token:
+            return symbol
+
+    return token.upper()
+
+
+async def execute_alert_auto_buy(db, user_id: str, alerts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Execute fake-money auto buys for eligible alerts based on user configuration."""
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        return {"executed": 0, "reason": "user_not_found"}
+
+    settings = user.get("settings") or {}
+    auto_buy_config = _merge_alert_auto_buy_config(settings.get("alert_auto_buy"))
+    if not bool(auto_buy_config.get("enabled")):
+        return {"executed": 0, "reason": "disabled"}
+
+    direction_pref = str(auto_buy_config.get("direction", "down") or "down").strip().lower()
+    if direction_pref not in {"up", "down", "both"}:
+        direction_pref = "down"
+
+    amount_per_order = max(float(auto_buy_config.get("amount_per_order_usd", 50.0) or 0), 1.0)
+    max_orders_per_day = max(int(auto_buy_config.get("max_orders_per_day", 3) or 0), 1)
+    cooldown_minutes = max(int(auto_buy_config.get("cooldown_minutes", 30) or 0), 1)
+    last_triggered = auto_buy_config.get("last_triggered") if isinstance(auto_buy_config.get("last_triggered"), dict) else {}
+
+    portfolio = await get_user_portfolio(db, user_id)
+    if not portfolio:
+        return {"executed": 0, "reason": "portfolio_not_found"}
+
+    activity_log = list(portfolio.get("activity_log") or [])
+    orders_today = _count_today_auto_buy_orders(activity_log)
+    if orders_today >= max_orders_per_day:
+        return {"executed": 0, "reason": "daily_limit_reached"}
+
+    executed = []
+    now = datetime.utcnow()
+
+    for alert in alerts:
+        if orders_today >= max_orders_per_day:
+            break
+
+        direction = str(alert.get("direction", "")).strip().lower()
+        if direction_pref != "both" and direction != direction_pref:
+            continue
+
+        crypto_id = str(alert.get("crypto_id", "")).strip().lower()
+        current_price = float(alert.get("current_price", 0) or 0)
+        if not crypto_id or current_price <= 0:
+            continue
+
+        trigger_key = f"{crypto_id}:{direction}"
+        last_triggered_at = _parse_iso_datetime(last_triggered.get(trigger_key))
+        if last_triggered_at and (now - last_triggered_at) < timedelta(minutes=cooldown_minutes):
+            continue
+
+        available_cash = float(portfolio.get("cash", 0) or 0)
+        if available_cash < amount_per_order:
+            break
+
+        quantity = amount_per_order / current_price
+        if quantity <= 0:
+            continue
+
+        holding = {
+            "symbol": _resolve_alert_symbol(crypto_id),
+            "quantity": quantity,
+            "price": current_price,
+            "total_value": amount_per_order,
+            "investment_type": "fake_money",
+            "timestamp": now.isoformat(),
+        }
+
+        portfolio["cash"] = available_cash - amount_per_order
+        await update_user_portfolio(db, user_id, portfolio)
+        await add_user_holding(db, user_id, holding)
+
+        refreshed_portfolio = await get_user_portfolio(db, user_id)
+        refreshed_log = list((refreshed_portfolio or {}).get("activity_log") or [])
+        refreshed_log.append({
+            "event": "auto_buy_alert",
+            "symbol": holding["symbol"],
+            "crypto_id": crypto_id,
+            "direction": direction,
+            "investment_type": "fake_money",
+            "quantity": float(quantity),
+            "price": float(current_price),
+            "total_value": float(amount_per_order),
+            "timestamp": now.isoformat(),
+        })
+        refreshed_portfolio["activity_log"] = refreshed_log[-1000:]
+        await update_user_portfolio(db, user_id, refreshed_portfolio)
+
+        portfolio = refreshed_portfolio
+        orders_today += 1
+        last_triggered[trigger_key] = now.isoformat()
+        executed.append({
+            "symbol": holding["symbol"],
+            "quantity": float(quantity),
+            "price": float(current_price),
+            "amount_usd": float(amount_per_order),
+            "direction": direction,
+        })
+
+    if executed:
+        auto_buy_config["last_triggered"] = last_triggered
+        auto_buy_config["updated_at"] = now.isoformat()
+        users_col = db["users"]
+        await users_col.update_one(
+            {"_id": user.get("_id")},
+            {
+                "$set": {
+                    "settings.alert_auto_buy": auto_buy_config,
+                    "updated_at": now.isoformat(),
+                }
+            },
+        )
+
+    return {"executed": len(executed), "orders": executed}
+
+
+@app.get("/api/alerts/auto-buy", response_model=AlertAutoBuyConfigResponse)
+async def get_alert_auto_buy_config(authorization: Optional[str] = Header(None)):
+    """Get alert auto-buy settings for current user."""
+    try:
+        current_user = await resolve_optional_user_id(authorization)
+        if not current_user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+        db = await get_db()
+        user = await get_user_by_id(db, current_user)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        settings = user.get("settings") or {}
+        config = _merge_alert_auto_buy_config(settings.get("alert_auto_buy"))
+        portfolio = await get_user_portfolio(db, current_user)
+        orders_today = _count_today_auto_buy_orders((portfolio or {}).get("activity_log") or [])
+
+        return AlertAutoBuyConfigResponse(
+            enabled=bool(config.get("enabled")),
+            direction=str(config.get("direction", "down") or "down"),
+            amount_per_order_usd=float(config.get("amount_per_order_usd", 50.0) or 50.0),
+            max_orders_per_day=int(config.get("max_orders_per_day", 3) or 3),
+            cooldown_minutes=int(config.get("cooldown_minutes", 30) or 30),
+            orders_today=int(orders_today),
+            updated_at=config.get("updated_at"),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching auto-buy settings: {e}")
+
+
+@app.post("/api/alerts/auto-buy", response_model=AlertAutoBuyConfigResponse)
+async def update_alert_auto_buy_config(
+    request: AlertAutoBuyConfigRequest,
+    authorization: Optional[str] = Header(None)
+):
+    """Update alert auto-buy settings for current user."""
+    try:
+        direction = str(request.direction or "down").strip().lower()
+        if direction not in {"up", "down", "both"}:
+            raise HTTPException(status_code=400, detail="direction must be one of: up, down, both")
+
+        amount_per_order_usd = float(request.amount_per_order_usd or 0)
+        if amount_per_order_usd < 1:
+            raise HTTPException(status_code=400, detail="amount_per_order_usd must be at least 1")
+
+        max_orders_per_day = int(request.max_orders_per_day or 0)
+        if max_orders_per_day < 1 or max_orders_per_day > 100:
+            raise HTTPException(status_code=400, detail="max_orders_per_day must be between 1 and 100")
+
+        cooldown_minutes = int(request.cooldown_minutes or 0)
+        if cooldown_minutes < 1 or cooldown_minutes > 1440:
+            raise HTTPException(status_code=400, detail="cooldown_minutes must be between 1 and 1440")
+
+        current_user = await resolve_optional_user_id(authorization)
+        if not current_user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+        db = await get_db()
+        user = await get_user_by_id(db, current_user)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        settings = user.get("settings") or {}
+        current_config = _merge_alert_auto_buy_config(settings.get("alert_auto_buy"))
+        updated_config = {
+            **current_config,
+            "enabled": bool(request.enabled),
+            "direction": direction,
+            "amount_per_order_usd": amount_per_order_usd,
+            "max_orders_per_day": max_orders_per_day,
+            "cooldown_minutes": cooldown_minutes,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+
+        users_col = db["users"]
+        await users_col.update_one(
+            {"_id": user.get("_id")},
+            {
+                "$set": {
+                    "settings.alert_auto_buy": updated_config,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            },
+        )
+
+        portfolio = await get_user_portfolio(db, current_user)
+        orders_today = _count_today_auto_buy_orders((portfolio or {}).get("activity_log") or [])
+
+        return AlertAutoBuyConfigResponse(
+            enabled=bool(updated_config.get("enabled")),
+            direction=str(updated_config.get("direction", "down")),
+            amount_per_order_usd=float(updated_config.get("amount_per_order_usd", 50.0)),
+            max_orders_per_day=int(updated_config.get("max_orders_per_day", 3)),
+            cooldown_minutes=int(updated_config.get("cooldown_minutes", 30)),
+            orders_today=int(orders_today),
+            updated_at=updated_config.get("updated_at"),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating auto-buy settings: {e}")
 
 
 # ============================================================================
@@ -1101,6 +1538,9 @@ async def get_history(
         
     Returns:
         List of historical price records
+        # Sanitize crypto_id: strip any :quantity notation (e.g., "tether:1" -> "tether")
+        crypto_id = str(crypto_id or "").split(":")[0].strip().lower()
+        
     """
     try:
         # Create cache key based on crypto_id (limit doesn't significantly vary results)
@@ -1188,6 +1628,9 @@ async def get_ml_data(crypto_id: str):
         
     Returns:
         MLDataResponse with train/test split information
+        # Sanitize crypto_id: strip any :quantity notation (e.g., "tether:1" -> "tether")
+        crypto_id = str(crypto_id or "").split(":")[0].strip().lower()
+        
     """
     try:
         df = load_price_data("crypto_prices.csv")
@@ -1357,21 +1800,149 @@ async def get_config():
     return config
 
 
+@app.get("/api/system/live-readiness")
+async def get_live_readiness():
+    """Return non-sensitive readiness signals for live checkout and execution."""
+    stripe_secret_key = str(os.getenv("STRIPE_SECRET_KEY", "")).strip()
+    stripe_publishable_key = str(os.getenv("STRIPE_PUBLISHABLE_KEY", "")).strip()
+    stripe_keys_configured = bool(stripe_secret_key and stripe_publishable_key)
+    stripe_placeholder = (
+        stripe_secret_key in {"", "sk_test_mock"}
+        or stripe_publishable_key in {"", "pk_test_mock"}
+    )
+    stripe_live_mode = stripe_secret_key.startswith("sk_live_") and stripe_publishable_key.startswith("pk_live_")
+
+    stripe_ready = SUBSCRIPTION_AVAILABLE and stripe_keys_configured and not stripe_placeholder
+    stripe_message = "Stripe ready" if stripe_ready else "Stripe not configured for checkout"
+
+    if stripe_ready and not stripe_live_mode:
+        stripe_message = "Stripe is in test mode"
+
+    binance_ready = False
+    binance_message = "Binance not connected"
+    try:
+        binance_ready = bool(is_connected())
+        if binance_ready:
+            binance_message = "Binance connected"
+    except Exception as e:
+        binance_message = f"Binance check failed: {e}"
+
+    alpaca_ready = False
+    alpaca_message = "Alpaca not authenticated"
+    try:
+        alpaca_ready = bool(is_authenticated())
+        if alpaca_ready:
+            alpaca_message = "Alpaca authenticated"
+    except Exception as e:
+        alpaca_message = f"Alpaca check failed: {e}"
+
+    return {
+        "stripe": {
+            "ready": stripe_ready,
+            "live_mode": stripe_live_mode,
+            "message": stripe_message,
+            "subscription_module_available": bool(SUBSCRIPTION_AVAILABLE),
+        },
+        "execution": {
+            "binance": {"ready": binance_ready, "message": binance_message},
+            "alpaca": {"ready": alpaca_ready, "message": alpaca_message},
+        },
+        "can_start_checkout": bool(stripe_ready),
+        "can_execute_crypto_order": bool(binance_ready or alpaca_ready),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+# Hardcoded top-250 fallback catalog used when CoinGecko is rate-limited or unavailable.
+_FALLBACK_ASSET_CATALOG: List[Dict[str, str]] = [
+    {"id": "bitcoin", "symbol": "BTC", "name": "Bitcoin"},
+    {"id": "ethereum", "symbol": "ETH", "name": "Ethereum"},
+    {"id": "tether", "symbol": "USDT", "name": "Tether"},
+    {"id": "binancecoin", "symbol": "BNB", "name": "BNB"},
+    {"id": "usd-coin", "symbol": "USDC", "name": "USDC"},
+    {"id": "cardano", "symbol": "ADA", "name": "Cardano"},
+    {"id": "solana", "symbol": "SOL", "name": "Solana"},
+    {"id": "ripple", "symbol": "XRP", "name": "XRP"},
+    {"id": "tron", "symbol": "TRX", "name": "TRON"},
+    {"id": "toncoin", "symbol": "TON", "name": "Toncoin"},
+    {"id": "polkadot", "symbol": "DOT", "name": "Polkadot"},
+    {"id": "dogecoin", "symbol": "DOGE", "name": "Dogecoin"},
+    {"id": "shiba-inu", "symbol": "SHIB", "name": "Shiba Inu"},
+    {"id": "avalanche-2", "symbol": "AVAX", "name": "Avalanche"},
+    {"id": "chainlink", "symbol": "LINK", "name": "Chainlink"},
+    {"id": "polygon", "symbol": "MATIC", "name": "Polygon"},
+    {"id": "litecoin", "symbol": "LTC", "name": "Litecoin"},
+    {"id": "uniswap", "symbol": "UNI", "name": "Uniswap"},
+    {"id": "bitcoin-cash", "symbol": "BCH", "name": "Bitcoin Cash"},
+    {"id": "near", "symbol": "NEAR", "name": "NEAR Protocol"},
+    {"id": "stellar", "symbol": "XLM", "name": "Stellar"},
+    {"id": "filecoin", "symbol": "FIL", "name": "Filecoin"},
+    {"id": "hedera-hashgraph", "symbol": "HBAR", "name": "Hedera"},
+    {"id": "cosmos", "symbol": "ATOM", "name": "Cosmos"},
+    {"id": "algorand", "symbol": "ALGO", "name": "Algorand"},
+    {"id": "aptos", "symbol": "APT", "name": "Aptos"},
+    {"id": "arbitrum", "symbol": "ARB", "name": "Arbitrum"},
+    {"id": "optimism", "symbol": "OP", "name": "Optimism"},
+    {"id": "render-token", "symbol": "RENDER", "name": "Render"},
+    {"id": "immutable-x", "symbol": "IMX", "name": "Immutable X"},
+    {"id": "aave", "symbol": "AAVE", "name": "Aave"},
+    {"id": "the-graph", "symbol": "GRT", "name": "The Graph"},
+    {"id": "quant-network", "symbol": "QNT", "name": "Quant"},
+    {"id": "elrond-erd-2", "symbol": "EGLD", "name": "MultiversX"},
+    {"id": "fantom", "symbol": "FTM", "name": "Fantom"},
+    {"id": "vechain", "symbol": "VET", "name": "VeChain"},
+    {"id": "theta-token", "symbol": "THETA", "name": "Theta Network"},
+    {"id": "flow", "symbol": "FLOW", "name": "Flow"},
+    {"id": "internet-computer", "symbol": "ICP", "name": "Internet Computer"},
+    {"id": "decentraland", "symbol": "MANA", "name": "Decentraland"},
+    {"id": "the-sandbox", "symbol": "SAND", "name": "The Sandbox"},
+    {"id": "axie-infinity", "symbol": "AXS", "name": "Axie Infinity"},
+    {"id": "gala", "symbol": "GALA", "name": "Gala"},
+    {"id": "enjincoin", "symbol": "ENJ", "name": "Enjin Coin"},
+    {"id": "curve-dao-token", "symbol": "CRV", "name": "Curve DAO"},
+    {"id": "maker", "symbol": "MKR", "name": "Maker"},
+    {"id": "compound-governance-token", "symbol": "COMP", "name": "Compound"},
+    {"id": "yearn-finance", "symbol": "YFI", "name": "yearn.finance"},
+    {"id": "sushi", "symbol": "SUSHI", "name": "SushiSwap"},
+    {"id": "1inch", "symbol": "1INCH", "name": "1inch"},
+    {"id": "loopring", "symbol": "LRC", "name": "Loopring"},
+    {"id": "basic-attention-token", "symbol": "BAT", "name": "Basic Attention Token"},
+    {"id": "chiliz", "symbol": "CHZ", "name": "Chiliz"},
+    {"id": "eos", "symbol": "EOS", "name": "EOS"},
+    {"id": "neo", "symbol": "NEO", "name": "NEO"},
+    {"id": "iota", "symbol": "MIOTA", "name": "IOTA"},
+    {"id": "dash", "symbol": "DASH", "name": "Dash"},
+    {"id": "zcash", "symbol": "ZEC", "name": "Zcash"},
+    {"id": "ravencoin", "symbol": "RVN", "name": "Ravencoin"},
+    {"id": "waves", "symbol": "WAVES", "name": "Waves"},
+    {"id": "monero", "symbol": "XMR", "name": "Monero"},
+    {"id": "ethereum-classic", "symbol": "ETC", "name": "Ethereum Classic"},
+    {"id": "tezos", "symbol": "XTZ", "name": "Tezos"},
+]
+
+
 @app.get("/api/assets")
 async def get_assets(limit: int = 250):
     """Get a broader list of available assets for price views/search."""
     try:
         assets = fetch_available_cryptocurrencies(limit=limit)
+        if not assets:
+            # CoinGecko unavailable or rate-limited — use built-in catalog.
+            logger.warning("CoinGecko unavailable for /api/assets; returning built-in catalog")
+            capped = min(max(int(limit), 1), 250)
+            assets = _FALLBACK_ASSET_CATALOG[:capped]
         return {
             "count": len(assets),
             "assets": assets,
             "limit": min(max(int(limit), 1), 250),
         }
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching asset catalog: {str(e)}"
-        )
+        capped = min(max(int(limit), 1), 250)
+        return {
+            "count": len(_FALLBACK_ASSET_CATALOG[:capped]),
+            "assets": _FALLBACK_ASSET_CATALOG[:capped],
+            "limit": capped,
+        }
 
 
 # ============================================================================
@@ -1453,22 +2024,415 @@ def analyze_message_context(message: str) -> Dict:
         'asks_alert': any(word in message_lower for word in ['alert', 'notify', 'change']),
         'asks_analysis': any(word in message_lower for word in ['analyze', 'analysis', 'opinion', 'think']),
         'asks_profile': any(word in message_lower for word in ['profile', 'account', 'username', 'email', 'plan', 'tier']),
-        'asks_investments': any(word in message_lower for word in ['investment', 'investments', 'portfolio', 'holding', 'holdings', 'cash', 'buying power', 'profit', 'loss'])
+        'asks_investments': any(
+            word in message_lower for word in [
+                'investment', 'investments', 'portfolio', 'proflio', 'porfolio',
+                'holding', 'holdings', 'position', 'positions', 'stock', 'stocks',
+                'cash', 'buying power', 'profit', 'loss', 'pnl', 'p&l', 'value', 'exposure'
+            ]
+        )
     }
 
 
 def _format_holding_summary(holding: Dict[str, Any]) -> str:
     symbol = str(holding.get("symbol") or holding.get("asset") or "UNKNOWN").upper()
     quantity = float(holding.get("quantity", 0) or 0)
-    purchase_price = float(holding.get("purchase_price", 0) or 0)
-    current_price = float(holding.get("current_price", purchase_price) or purchase_price or 0)
-    return f"{symbol}: qty {quantity:.6g}, avg ${purchase_price:,.2f}, current ${current_price:,.2f}"
+    average_price = float(
+        holding.get("average_price", holding.get("purchase_price", holding.get("price", 0))) or 0
+    )
+    current_price = float(holding.get("current_price", average_price) or average_price or 0)
+    unrealized_pnl = float(holding.get("unrealized_pnl", 0) or 0)
+    return (
+        f"{symbol}: qty {quantity:.6g}, avg ${average_price:,.2f}, "
+        f"current ${current_price:,.2f}, P&L {unrealized_pnl:+,.2f}"
+    )
 
 
 def _format_top_holdings_text(holdings_summary: List[str]) -> str:
     if not holdings_summary:
         return "No holdings recorded yet."
     return "; ".join(holdings_summary)
+
+
+def _build_portfolio_numbers_bridge_text(user_chat_context: Optional[Dict[str, Any]]) -> str:
+    """Build a compact numeric summary that ties holdings data to portfolio totals."""
+    if not user_chat_context:
+        return ""
+
+    portfolio_total_value = float(user_chat_context.get("portfolio_total_value", 0) or 0)
+    portfolio_cash = float(user_chat_context.get("portfolio_cash", 0) or 0)
+    total_cost_basis = float(user_chat_context.get("total_cost_basis", 0) or 0)
+    unrealized = float(user_chat_context.get("unrealized_pnl_overall", 0) or 0)
+    realized = float(user_chat_context.get("realized_pnl_overall", 0) or 0)
+    net = float(user_chat_context.get("net_pnl_overall", 0) or 0)
+
+    holdings_detailed = user_chat_context.get("holdings_detailed") or []
+    holdings_market_value = sum(float(item.get("market_value", 0) or 0) for item in holdings_detailed)
+
+    top_symbol = "N/A"
+    top_weight_pct = 0.0
+    if holdings_detailed:
+        top_holding = max(holdings_detailed, key=lambda item: float(item.get("market_value", 0) or 0))
+        top_symbol = str(top_holding.get("symbol") or "N/A").upper()
+        top_market_value = float(top_holding.get("market_value", 0) or 0)
+        denominator = portfolio_total_value if portfolio_total_value > 0 else max(holdings_market_value, 1.0)
+        top_weight_pct = (top_market_value / denominator) * 100 if denominator > 0 else 0.0
+
+    cash_ratio_pct = (portfolio_cash / portfolio_total_value) * 100 if portfolio_total_value > 0 else 0.0
+
+    return (
+        f"Numbers bridge: total ${portfolio_total_value:,.2f}, cost basis ${total_cost_basis:,.2f}, "
+        f"unrealized ${unrealized:+,.2f}, realized ${realized:+,.2f}, net ${net:+,.2f}, "
+        f"cash ratio {cash_ratio_pct:.1f}%, top position {top_symbol} {top_weight_pct:.1f}% of portfolio."
+    )
+
+
+def _derive_context_crypto_ids(context: Dict[str, Any], user_chat_context: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Build a focused list of crypto ids for external context calls."""
+    candidate_ids: List[str] = []
+
+    for crypto_id in context.get("cryptos", []) or []:
+        normalized = str(crypto_id or "").strip().lower()
+        if normalized:
+            candidate_ids.append(normalized)
+
+    for holding in (user_chat_context or {}).get("holdings_detailed", [])[:5]:
+        symbol = str(holding.get("symbol", "") or "").upper()
+        if symbol and symbol in LIVE_PRICE_SYMBOLS:
+            candidate_ids.append(LIVE_PRICE_SYMBOLS[symbol])
+
+    deduped = []
+    seen = set()
+    for crypto_id in candidate_ids:
+        if crypto_id not in seen:
+            deduped.append(crypto_id)
+            seen.add(crypto_id)
+
+    return deduped[:5]
+
+
+def _compute_headline_sentiment(headlines: List[str]) -> Dict[str, Any]:
+    """Very lightweight lexical sentiment estimate for quick chat context."""
+    positive_words = {
+        "surge", "rally", "gain", "bull", "breakout", "up", "positive", "strong", "record", "growth"
+    }
+    negative_words = {
+        "drop", "fall", "bear", "crash", "down", "risk", "weak", "loss", "hack", "lawsuit"
+    }
+
+    score = 0
+    for headline in headlines:
+        lower = str(headline or "").lower()
+        score += sum(1 for token in positive_words if token in lower)
+        score -= sum(1 for token in negative_words if token in lower)
+
+    if score > 1:
+        label = "bullish"
+    elif score < -1:
+        label = "bearish"
+    else:
+        label = "neutral"
+
+    return {
+        "label": label,
+        "score": score,
+        "samples": len(headlines)
+    }
+
+
+def _fetch_news_sentiment_context(crypto_ids: List[str]) -> Dict[str, Any]:
+    """Fetch market headlines and derive a simple sentiment summary."""
+    cache_key = f"chat_news_context:{','.join(sorted(crypto_ids)) or 'general'}"
+    cached = get_cached_response(cache_key, ttl_seconds=120)
+    if cached:
+        return cached
+
+    cryptopanic_key = os.getenv("CRYPTOPANIC_API_KEY", "").strip()
+    newsapi_key = os.getenv("NEWSAPI_KEY", "").strip()
+    newsdata_key = os.getenv("NEWSDATA_API_KEY", "").strip()
+    result = {
+        "provider": "none",
+        "available": False,
+        "headlines": [],
+        "sentiment": {"label": "neutral", "score": 0, "samples": 0},
+        "note": "Configure CRYPTOPANIC_API_KEY, NEWSAPI_KEY, or NEWSDATA_API_KEY for live news context."
+    }
+
+    query_terms = crypto_ids[:2] or ["crypto", "bitcoin"]
+
+    try:
+        headlines: List[str] = []
+        if cryptopanic_key:
+            url = "https://cryptopanic.com/api/v1/posts/"
+            params = {
+                "auth_token": cryptopanic_key,
+                "currencies": ",".join(query_terms),
+                "public": "true"
+            }
+            response = requests.get(url, params=params, timeout=8)
+            if response.status_code == 200:
+                payload = response.json() or {}
+                posts = payload.get("results") or []
+                headlines = [str(post.get("title") or "").strip() for post in posts[:6] if post.get("title")]
+                result["provider"] = "cryptopanic"
+
+        if not headlines and newsapi_key:
+            url = "https://newsapi.org/v2/everything"
+            params = {
+                "q": " OR ".join(query_terms),
+                "sortBy": "publishedAt",
+                "language": "en",
+                "pageSize": 6,
+                "apiKey": newsapi_key,
+            }
+            response = requests.get(url, params=params, timeout=8)
+            if response.status_code == 200:
+                payload = response.json() or {}
+                articles = payload.get("articles") or []
+                headlines = [str(article.get("title") or "").strip() for article in articles if article.get("title")][:6]
+                result["provider"] = "newsapi"
+
+        if not headlines and newsdata_key:
+            url = "https://newsdata.io/api/1/latest"
+            params = {
+                "apikey": newsdata_key,
+                "q": " OR ".join(query_terms),
+                "language": "en",
+                "size": 6,
+            }
+            response = requests.get(url, params=params, timeout=8)
+            if response.status_code == 200:
+                payload = response.json() or {}
+                articles = payload.get("results") or []
+                headlines = [str(article.get("title") or "").strip() for article in articles if article.get("title")][:6]
+                result["provider"] = "newsdata"
+
+        if headlines:
+            result["available"] = True
+            result["headlines"] = headlines
+            result["sentiment"] = _compute_headline_sentiment(headlines)
+            result["note"] = None
+    except Exception as e:
+        logger.debug(f"News context fetch failed: {e}")
+
+    set_cached_response(cache_key, result, ttl_seconds=120)
+    return result
+
+
+def _fetch_onchain_context(crypto_ids: List[str]) -> Dict[str, Any]:
+    """Fetch on-chain activity signals using Glassnode when configured."""
+    cache_key = f"chat_onchain_context:{','.join(sorted(crypto_ids)) or 'general'}"
+    cached = get_cached_response(cache_key, ttl_seconds=180)
+    if cached:
+        return cached
+
+    glassnode_key = os.getenv("GLASSNODE_API_KEY", "").strip()
+    id_to_symbol = {
+        "bitcoin": "BTC",
+        "ethereum": "ETH",
+    }
+    result = {
+        "provider": "none",
+        "available": False,
+        "metrics": {},
+        "note": "Configure GLASSNODE_API_KEY for live on-chain metrics."
+    }
+
+    if not glassnode_key:
+        set_cached_response(cache_key, result, ttl_seconds=180)
+        return result
+
+    try:
+        metrics = {}
+        for crypto_id in crypto_ids[:2]:
+            asset_symbol = id_to_symbol.get(crypto_id)
+            if not asset_symbol:
+                continue
+
+            response = requests.get(
+                "https://api.glassnode.com/v1/metrics/addresses/active_count",
+                params={"a": asset_symbol, "i": "24h", "api_key": glassnode_key},
+                timeout=8,
+            )
+            if response.status_code != 200:
+                continue
+
+            payload = response.json() or []
+            if payload:
+                latest_point = payload[-1]
+                metrics[crypto_id] = {
+                    "active_addresses_24h": float(latest_point.get("v", 0) or 0),
+                    "timestamp": int(latest_point.get("t", 0) or 0),
+                }
+
+        if metrics:
+            result.update({
+                "provider": "glassnode",
+                "available": True,
+                "metrics": metrics,
+                "note": None,
+            })
+    except Exception as e:
+        logger.debug(f"On-chain context fetch failed: {e}")
+
+    set_cached_response(cache_key, result, ttl_seconds=180)
+    return result
+
+
+def _fetch_exchange_account_context() -> Dict[str, Any]:
+    """Fetch connected exchange account summaries for personalized risk context."""
+    cache_key = "chat_exchange_account_context"
+    cached = get_cached_response(cache_key, ttl_seconds=60)
+    if cached:
+        return cached
+
+    result = {
+        "alpaca": {"connected": False},
+        "binance": {"connected": False},
+        "connected_exchanges": 0,
+    }
+
+    try:
+        if is_authenticated():
+            account = get_account_info()
+            holdings = get_holdings()
+            result["alpaca"] = {
+                "connected": True,
+                "cash": float(account.get("cash", 0) or 0),
+                "equity": float(account.get("equity", 0) or 0),
+                "buying_power": float(account.get("buying_power", 0) or 0),
+                "holdings_count": len((holdings or {}).get("holdings") or []),
+                "holdings_value": float((holdings or {}).get("total_value", 0) or 0),
+            }
+    except Exception as e:
+        logger.debug(f"Alpaca context fetch failed: {e}")
+
+    try:
+        if is_connected():
+            portfolio = get_portfolio_value(base_currency="USDT")
+            balances = get_balance()
+            result["binance"] = {
+                "connected": True,
+                "portfolio_value_usdt": float((portfolio or {}).get("total_value", 0) or 0),
+                "positions_count": len((portfolio or {}).get("holdings") or []),
+                "non_zero_balances": len(balances or []),
+            }
+    except Exception as e:
+        logger.debug(f"Binance context fetch failed: {e}")
+
+    result["connected_exchanges"] = int(result["alpaca"]["connected"]) + int(result["binance"]["connected"])
+    set_cached_response(cache_key, result, ttl_seconds=60)
+    return result
+
+
+def _is_low_quality_ai_response(response_text: str) -> bool:
+    """Detect generic or non-actionable model responses that should be retried."""
+    text = str(response_text or "").strip()
+    if not text:
+        return True
+
+    lower_text = text.lower()
+    blocked_phrases = [
+        "i am not connected to any api",
+        "simulating responses",
+        "refer to the following link",
+        "for more information about robinhood",
+        "check the official documentation",
+    ]
+    if any(phrase in lower_text for phrase in blocked_phrases):
+        return True
+
+    generic_markers = [
+        "as an ai model",
+        "i recommend checking",
+        "official documentation",
+        "cannot access real-time",
+    ]
+    has_generic_marker = any(marker in lower_text for marker in generic_markers)
+
+    # For portfolio and account questions, require at least one concrete numeric cue.
+    asks_personal_finance = any(token in lower_text for token in ["portfolio", "p&l", "pnl", "profit", "loss", "holding", "cash", "buying power"])
+    has_numeric_signal = any(ch.isdigit() for ch in text) or "$" in text or "%" in text
+
+    if asks_personal_finance and not has_numeric_signal:
+        return True
+
+    return has_generic_marker and len(text) < 280
+
+
+def _build_strict_retry_system_prompt() -> str:
+    """Create a stricter response policy used for one retry when quality is low."""
+    base_prompt = load_system_prompt()
+    return (
+        f"{base_prompt}\n\n"
+        "STRICT RESPONSE POLICY:\n"
+        "- Use provided CRYPTOCURRENCY CONTEXT fields first and cite concrete values when available.\n"
+        "- Never say you are not connected to APIs or that you are simulating.\n"
+        "- Do not give documentation-only answers unless user explicitly asked for docs.\n"
+        "- If data is missing, state exactly what is missing and still provide best actionable guidance.\n"
+        "- Keep the response directly actionable and specific."
+    )
+
+
+def _heuristic_grammar_fix(text: str) -> str:
+    """Best-effort local grammar and spelling cleanup when LLM is unavailable."""
+    cleaned = " ".join(str(text or "").split())
+    if not cleaned:
+        return ""
+
+    replacements = {
+        "proflio": "portfolio",
+        "protfolio": "portfolio",
+        "porfolio": "portfolio",
+        "teh": "the",
+        "dont": "don't",
+        "cant": "can't",
+        "wont": "won't",
+        "im ": "I'm ",
+        " i ": " I ",
+    }
+
+    lower_cleaned = cleaned.lower()
+    for wrong, right in replacements.items():
+        lower_cleaned = lower_cleaned.replace(wrong, right)
+
+    if lower_cleaned:
+        lower_cleaned = lower_cleaned[0].upper() + lower_cleaned[1:]
+    if lower_cleaned and lower_cleaned[-1] not in {".", "?", "!"}:
+        if any(token in lower_cleaned for token in ["what", "how", "why", "when", "where", "who", "do ", "does ", "can ", "should "]):
+            lower_cleaned = f"{lower_cleaned}?"
+        else:
+            lower_cleaned = f"{lower_cleaned}."
+
+    return lower_cleaned
+
+
+def correct_text_grammar(text: str) -> str:
+    """Correct text grammar with Ollama first, then local fallback."""
+    source = str(text or "")
+    stripped = source.strip()
+    if not stripped:
+        return ""
+
+    if check_ollama_health():
+        strict_prompt = (
+            "You are a grammar and spelling correction assistant. "
+            "Return only the corrected text with no explanations, no labels, and no quotes."
+        )
+        try:
+            response = get_ollama_response(
+                stripped,
+                system_prompt=strict_prompt,
+                crypto_context=None,
+            )
+            if response:
+                candidate = str(response).strip().strip('"').strip("'")
+                if candidate and len(candidate) <= max(len(stripped) * 3, 80):
+                    return candidate
+        except Exception as grammar_error:
+            logger.debug(f"Grammar correction via Ollama failed: {grammar_error}")
+
+    return _heuristic_grammar_fix(stripped)
 
 
 def answer_personal_chat_question(
@@ -1484,6 +2448,7 @@ def answer_personal_chat_question(
         message_lower = str(message or '').lower()
         holdings_summary = user_chat_context.get('holdings_summary') or []
         holdings_text = _format_top_holdings_text(holdings_summary)
+        numbers_bridge = _build_portfolio_numbers_bridge_text(user_chat_context)
 
         if context.get('asks_profile') and not context.get('asks_investments'):
             return (
@@ -1498,10 +2463,20 @@ def answer_personal_chat_question(
                 f"${user_chat_context.get('personal_buying_power', 0):,.2f} in personal buying power."
             )
 
+        if any(term in message_lower for term in ['profit', 'loss', 'pnl', 'p&l', 'gain']):
+            return (
+                f"Portfolio P&L snapshot: unrealized ${user_chat_context.get('unrealized_pnl_overall', 0):+,.2f}, "
+                f"realized ${user_chat_context.get('realized_pnl_overall', 0):+,.2f}, "
+                f"net ${user_chat_context.get('net_pnl_overall', 0):+,.2f}. "
+                f"Practice net ${user_chat_context.get('net_pnl_fake', 0):+,.2f}, "
+                f"Real-money net ${user_chat_context.get('net_pnl_real', 0):+,.2f}."
+            )
+
         if any(term in message_lower for term in ['holding', 'holdings', 'what did i buy', 'what do i own', 'portfolio']):
             return (
                 f"Your portfolio summary: total value ${user_chat_context.get('portfolio_total_value', 0):,.2f}, "
-                f"holdings {user_chat_context.get('holdings_count', 0)}. Top holdings: {holdings_text}"
+                f"holdings {user_chat_context.get('holdings_count', 0)}. Top holdings: {holdings_text}. "
+                f"{numbers_bridge}"
             )
 
         return (
@@ -1510,7 +2485,7 @@ def answer_personal_chat_question(
             f"portfolio value ${user_chat_context.get('portfolio_total_value', 0):,.2f}, "
             f"cash ${user_chat_context.get('portfolio_cash', 0):,.2f}, "
             f"personal buying power ${user_chat_context.get('personal_buying_power', 0):,.2f}, "
-            f"holdings {user_chat_context.get('holdings_count', 0)}."
+            f"holdings {user_chat_context.get('holdings_count', 0)}. {numbers_bridge}"
         )
 
     return None
@@ -1530,7 +2505,75 @@ async def build_user_chat_context(user_id: Optional[str], subscription_tier: Opt
             return None
 
         holdings = portfolio.get("holdings", []) or []
-        summarized_holdings = [_format_holding_summary(holding) for holding in holdings[:5]]
+
+        symbol_to_crypto_id = {}
+        for holding in holdings:
+            symbol = str(holding.get("symbol", "") or "").upper()
+            if symbol and symbol in LIVE_PRICE_SYMBOLS:
+                symbol_to_crypto_id[symbol] = LIVE_PRICE_SYMBOLS[symbol]
+
+        live_prices = {}
+        if symbol_to_crypto_id:
+            try:
+                live_prices = await get_multiple_prices_with_cache(list(symbol_to_crypto_id.values()))
+            except Exception as live_error:
+                logger.debug(f"Could not build live holding prices for chat context: {live_error}")
+
+        enriched_holdings = []
+        unrealized_overall = 0.0
+        unrealized_fake = 0.0
+        unrealized_real = 0.0
+        cost_basis_overall = 0.0
+
+        for holding in holdings:
+            symbol = str(holding.get("symbol", "") or "").upper()
+            investment_type = str(holding.get("investment_type", "real_money") or "real_money").lower()
+            investment_type = "fake_money" if investment_type == "fake_money" else "real_money"
+            quantity = float(holding.get("quantity", 0) or 0)
+
+            average_price = float(holding.get("average_price", holding.get("price", 0)) or 0)
+            if average_price <= 0:
+                legacy_total = float(holding.get("total_value", 0) or 0)
+                if quantity > 0 and legacy_total > 0:
+                    average_price = legacy_total / quantity
+
+            crypto_id = symbol_to_crypto_id.get(symbol)
+            live_price = None
+            if crypto_id:
+                live_price_data = live_prices.get(crypto_id) or {}
+                live_price = float(live_price_data.get("price", 0) or 0)
+
+            current_price = live_price if live_price and live_price > 0 else float(holding.get("current_price", holding.get("price", average_price)) or average_price or 0)
+
+            cost_basis = quantity * average_price if quantity > 0 and average_price > 0 else 0.0
+            market_value = quantity * current_price if quantity > 0 and current_price > 0 else 0.0
+            unrealized_pnl = market_value - cost_basis
+
+            cost_basis_overall += cost_basis
+            unrealized_overall += unrealized_pnl
+            if investment_type == "fake_money":
+                unrealized_fake += unrealized_pnl
+            else:
+                unrealized_real += unrealized_pnl
+
+            enriched_holdings.append({
+                "symbol": symbol,
+                "investment_type": investment_type,
+                "quantity": quantity,
+                "average_price": average_price,
+                "current_price": current_price,
+                "cost_basis": cost_basis,
+                "market_value": market_value,
+                "unrealized_pnl": unrealized_pnl,
+            })
+
+        enriched_holdings.sort(key=lambda item: item.get("market_value", 0), reverse=True)
+        summarized_holdings = [_format_holding_summary(holding) for holding in enriched_holdings[:5]]
+
+        realized_summary = portfolio.get("realized_pnl") or {}
+        realized_overall = float(realized_summary.get("overall", 0) or 0)
+        realized_fake = float(realized_summary.get("fake_money", 0) or 0)
+        realized_real = float(realized_summary.get("real_money", 0) or 0)
 
         return {
             "username": user.get("username"),
@@ -1540,8 +2583,28 @@ async def build_user_chat_context(user_id: Optional[str], subscription_tier: Opt
             "portfolio_total_value": float(portfolio.get("total_value", 0) or 0),
             "portfolio_cash": float(portfolio.get("cash", 0) or 0),
             "personal_buying_power": float(portfolio.get("personal_buying_power", 0) or 0),
+            "total_cost_basis": cost_basis_overall,
+            "unrealized_pnl_overall": unrealized_overall,
+            "unrealized_pnl_fake": unrealized_fake,
+            "unrealized_pnl_real": unrealized_real,
+            "realized_pnl_overall": realized_overall,
+            "realized_pnl_fake": realized_fake,
+            "realized_pnl_real": realized_real,
+            "net_pnl_overall": unrealized_overall + realized_overall,
+            "net_pnl_fake": unrealized_fake + realized_fake,
+            "net_pnl_real": unrealized_real + realized_real,
             "holdings_count": len(holdings),
             "holdings_summary": summarized_holdings,
+            "holdings_detailed": enriched_holdings[:10],
+            "portfolio_numbers_bridge": _build_portfolio_numbers_bridge_text({
+                "portfolio_total_value": float(portfolio.get("total_value", 0) or 0),
+                "portfolio_cash": float(portfolio.get("cash", 0) or 0),
+                "total_cost_basis": cost_basis_overall,
+                "unrealized_pnl_overall": unrealized_overall,
+                "realized_pnl_overall": realized_overall,
+                "net_pnl_overall": unrealized_overall + realized_overall,
+                "holdings_detailed": enriched_holdings[:10],
+            }),
             "last_portfolio_update": portfolio.get("last_updated") or "unknown"
         }
     except Exception as e:
@@ -1568,6 +2631,21 @@ def generate_ai_response(message: str, context: Dict, user_chat_context: Optiona
         
         # Build crypto context for Ollama
         crypto_context = user_chat_context.copy() if user_chat_context else {}
+        context_crypto_ids = _derive_context_crypto_ids(context, user_chat_context)
+
+        if context_crypto_ids or user_chat_context:
+            try:
+                news_context = _fetch_news_sentiment_context(context_crypto_ids)
+                onchain_context = _fetch_onchain_context(context_crypto_ids)
+                exchange_context = _fetch_exchange_account_context()
+                crypto_context.update({
+                    "news_context": news_context,
+                    "onchain_context": onchain_context,
+                    "exchange_context": exchange_context,
+                })
+            except Exception as enrichment_error:
+                logger.debug(f"Could not enrich chat context with external APIs: {enrichment_error}")
+
         if context['cryptos']:
             crypto_id = context['cryptos'][0]
             try:
@@ -1592,6 +2670,18 @@ def generate_ai_response(message: str, context: Dict, user_chat_context: Optiona
             ollama_response = get_ollama_response(message, crypto_context=crypto_context or None)
             
             if ollama_response:
+                if _is_low_quality_ai_response(ollama_response):
+                    logger.warning("Low-quality Ollama response detected; retrying once with strict prompt")
+                    retry_response = get_ollama_response(
+                        message,
+                        system_prompt=_build_strict_retry_system_prompt(),
+                        crypto_context=crypto_context or None,
+                    )
+                    if retry_response and not _is_low_quality_ai_response(retry_response):
+                        return retry_response
+
+                    logger.warning("Strict retry still low quality; using fallback response")
+                    return _generate_fallback_response(message, context, df, user_chat_context)
                 return ollama_response
             else:
                 logger.warning("Ollama returned empty response, falling back to pattern matching")
@@ -1727,6 +2817,30 @@ async def chat(request: ChatRequest, http_request: Request, authorization: Optio
             status_code=500,
             detail=f"Error processing chat request: {str(e)}"
         )
+
+
+@app.post("/api/text/grammar", response_model=GrammarResponse)
+async def grammar_tool(request: GrammarRequest, http_request: Request, authorization: Optional[str] = Header(None)):
+    """Correct grammar and spelling for short user text."""
+    try:
+        source_text = str(request.text or "")
+        if not source_text.strip():
+            raise HTTPException(status_code=400, detail="Text is required")
+
+        user_id = await resolve_optional_user_id(authorization)
+        actor_key = get_rate_limit_actor(http_request, user_id)
+        await enforce_rate_limit("chat", actor_key)
+
+        corrected = correct_text_grammar(source_text)
+        return GrammarResponse(
+            original=source_text,
+            corrected=corrected,
+            changed=corrected.strip() != source_text.strip(),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error correcting grammar: {str(e)}")
 
 
 # ============================================================================
@@ -2365,7 +3479,7 @@ def _build_local_fallback_universe(df: pd.DataFrame, limit: int = 10) -> List[Di
     if df is None or len(df) == 0 or "id" not in df.columns:
         return []
 
-    capped_limit = max(1, min(int(limit or 10), 10))
+    capped_limit = max(1, min(int(limit or 10), 250))
     unique_ids = [str(value).strip().lower() for value in df["id"].dropna().unique().tolist() if str(value).strip()]
 
     universe: List[Dict[str, Any]] = []
@@ -2388,10 +3502,22 @@ async def build_top_recommendation_universe(limit: int = 10) -> List[Dict[str, A
     The score blends breadth (CoinGecko market-cap ordering) and momentum
     (Binance top gainers), then returns the strongest assets.
     """
-    capped_limit = max(1, min(int(limit or 10), 10))
+    capped_limit = max(1, min(int(limit or 10), 250))
 
     # Base universe from CoinGecko market-cap ordering.
     catalog = await asyncio.to_thread(fetch_available_cryptocurrencies, 250)
+    if not catalog:
+        logger.warning("CoinGecko catalog unavailable for recommendation universe; using built-in fallback catalog")
+        catalog = [
+            {
+                "id": str(asset.get("id", "")).strip().lower(),
+                "symbol": str(asset.get("symbol", "")).strip().upper(),
+                "name": str(asset.get("name", "")).strip(),
+            }
+            for asset in _FALLBACK_ASSET_CATALOG[:250]
+            if str(asset.get("id", "")).strip()
+        ]
+
     if not catalog:
         return []
 
@@ -2531,6 +3657,56 @@ def derive_recommendation_action(recommendation: Dict[str, Any]) -> Dict[str, st
         "action_label": "BUY NOW"
     }
 
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def derive_recommendation_scores(
+    recommendation: Dict[str, Any],
+    trend_index: Dict[str, Dict[str, Any]],
+    universe_index: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Derive confidence and risk-adjusted score for recommendation ranking clarity."""
+    symbol = str(recommendation.get("symbol", "")).upper().strip()
+    trend = trend_index.get(symbol, {})
+    universe = universe_index.get(symbol, {})
+
+    change_24h = abs(_safe_float(trend.get("price_change_percent", recommendation.get("price_change_percent", 0))))
+    trend_label = str(recommendation.get("trend", trend.get("trend", "NEUTRAL"))).upper()
+    recommendation["trend"] = trend_label
+
+    # Convert rank into a 0-100 quality score where lower rank means stronger placement.
+    rank = int(universe.get("rank", 250) or 250)
+    rank_score = max(0.0, 100.0 - ((rank - 1) / 249.0) * 100.0)
+
+    momentum_score = min(change_24h * 4.0, 100.0)
+    trend_score = {"UPTREND": 85.0, "NEUTRAL": 55.0, "DOWNTREND": 35.0}.get(trend_label, 50.0)
+
+    confidence_score = (0.45 * rank_score) + (0.35 * trend_score) + (0.20 * momentum_score)
+
+    risk_label = str(recommendation.get("risk", "MEDIUM")).upper()
+    risk_penalty = {"LOW": 0.08, "MEDIUM": 0.22, "HIGH": 0.38}.get(risk_label, 0.22)
+    risk_adjusted_score = confidence_score * (1.0 - risk_penalty)
+
+    # Style bucket helps clients separate long-term, swing, and speculative ideas quickly.
+    if risk_label == "HIGH":
+        style_bucket = "speculative"
+    elif trend_label == "UPTREND" and risk_label == "LOW":
+        style_bucket = "long_term"
+    else:
+        style_bucket = "swing"
+
+    return {
+        "confidence_score": round(max(0.0, min(confidence_score, 100.0)), 2),
+        "risk_adjusted_score": round(max(0.0, min(risk_adjusted_score, 100.0)), 2),
+        "strategy_bucket": style_bucket,
+        "rank_in_universe": rank,
+    }
+
 @app.get("/api/recommendations")
 async def get_ai_recommendations(
     count: int = 5,
@@ -2636,37 +3812,130 @@ async def get_ai_recommendations(
         # Get market data
         df = load_price_data("crypto_prices.csv")
         
+        # Fetch news context early to capture provider info for debug
+        news_provider = "none"
+        try:
+            news_context = await asyncio.to_thread(_fetch_news_sentiment_context, [])
+            news_provider = news_context.get("provider", "none")
+        except Exception:
+            pass
+        
         if df is None or len(df) == 0:
             response = {
                 "status": "success",
                 "recommendations": [],
                 "reasoning": "Insufficient market data. Please refresh prices first.",
                 "risk_level": "N/A",
-                "candidate_universe": []
+                "candidate_universe": [],
+                "_debug": {
+                    "news_provider": news_provider
+                }
             }
             if not user_id:
                 set_cached_response(cache_key, response, ttl_seconds=300)
             return response
         
-        # Build a multi-API top universe and constrain recommendations to it.
-        top_universe = await build_top_recommendation_universe(limit=10)
-        if not top_universe:
-            top_universe = _build_local_fallback_universe(df, limit=10)
+        # Build a broad multi-API universe (up to 250 assets) for analysis quality,
+        # while still returning a concise candidate list for UI display.
+        analysis_universe = await build_top_recommendation_universe(limit=250)
+        if not analysis_universe:
+            analysis_universe = _build_local_fallback_universe(df, limit=250)
 
-        top_universe_ids = [item.get("crypto_id") for item in top_universe if item.get("crypto_id")]
-        top_universe_symbols = {
+        # If local history is sparse, still try to keep recommendation universe aligned
+        # with the full API catalog so recommendations are not limited to 1-2 assets.
+        if len(analysis_universe) < 250:
+            catalog_assets = await asyncio.to_thread(fetch_available_cryptocurrencies, 250)
+            if not catalog_assets:
+                catalog_assets = [
+                    {
+                        "id": str(asset.get("id", "")).strip().lower(),
+                        "symbol": str(asset.get("symbol", "")).strip().upper(),
+                        "name": str(asset.get("name", "")).strip(),
+                    }
+                    for asset in _FALLBACK_ASSET_CATALOG[:250]
+                    if str(asset.get("id", "")).strip()
+                ]
+            if catalog_assets:
+                existing_ids = {
+                    str(item.get("crypto_id", "")).strip().lower()
+                    for item in analysis_universe
+                    if str(item.get("crypto_id", "")).strip()
+                }
+
+                for rank, asset in enumerate(catalog_assets, start=1):
+                    catalog_id = str(asset.get("id", "")).strip().lower()
+                    if not catalog_id or catalog_id in existing_ids:
+                        continue
+
+                    analysis_universe.append(
+                        {
+                            "crypto_id": catalog_id,
+                            "symbol": str(asset.get("symbol", catalog_id)).strip().upper() or catalog_id.upper(),
+                            "score": max(0.0, 120.0 - (rank * 0.4)),
+                            "sources": ["coingecko-catalog"],
+                        }
+                    )
+                    existing_ids.add(catalog_id)
+
+                    if len(analysis_universe) >= 250:
+                        break
+
+        top_universe = analysis_universe[:10]
+
+        analysis_universe_ids = [item.get("crypto_id") for item in analysis_universe if item.get("crypto_id")]
+        analysis_universe_symbols = {
             str(item.get("symbol", "")).upper()
-            for item in top_universe
+            for item in analysis_universe
             if str(item.get("symbol", "")).strip()
         }
 
         scoped_df = df
-        if top_universe_ids and "id" in df.columns:
-            candidate_df = df[df["id"].isin(top_universe_ids)]
+        if analysis_universe_ids and "id" in df.columns:
+            candidate_df = df[df["id"].isin(analysis_universe_ids)]
             if candidate_df is not None and len(candidate_df) > 0:
                 scoped_df = candidate_df
 
         trends = analyze_multiple_trends(scoped_df, sma_window=5)
+
+        # Backfill trend-like signals from live market snapshot for assets that do not
+        # yet have enough local history rows in CSV.
+        trend_ids = {str(item.get("crypto_id", "")).strip().lower() for item in trends}
+        missing_ids = [crypto_id for crypto_id in analysis_universe_ids if crypto_id not in trend_ids]
+        if missing_ids:
+            snapshot_ids = missing_ids[:250]
+            try:
+                snapshot_quotes = await asyncio.to_thread(data_manager.get_coingecko_crypto, snapshot_ids)
+            except Exception as snapshot_exc:
+                logger.debug(f"Snapshot enrichment unavailable for recommendations: {snapshot_exc}")
+                snapshot_quotes = {}
+
+            for crypto_id in snapshot_ids:
+                payload = (snapshot_quotes or {}).get(crypto_id)
+                if not payload:
+                    continue
+
+                current_price = _safe_float(payload.get("usd"), 0.0)
+                price_change = _safe_float(payload.get("usd_24h_change"), 0.0)
+                if current_price <= 0:
+                    continue
+
+                estimated_reference = current_price / (1 + (price_change / 100.0)) if price_change != -100 else current_price
+                synthetic_trend = "UPTREND" if price_change > 0 else "DOWNTREND" if price_change < 0 else "NEUTRAL"
+
+                trends.append(
+                    {
+                        "crypto_id": crypto_id,
+                        "current_price": current_price,
+                        "sma": estimated_reference,
+                        "price_change_percent": price_change,
+                        "min_price": min(current_price, estimated_reference),
+                        "max_price": max(current_price, estimated_reference),
+                        "avg_price": (current_price + estimated_reference) / 2,
+                        "data_points": 1,
+                        "trend": synthetic_trend,
+                        "price_above_sma": current_price >= estimated_reference,
+                    }
+                )
         
         # Generate recommendations using AI if available, else use pattern matching
         recommendations = []
@@ -2699,10 +3968,10 @@ async def get_ai_recommendations(
                     json_match = re.search(r'\[.*\]', ai_response, re.DOTALL)
                     if json_match:
                         recommendations = json.loads(json_match.group())
-                        if top_universe_symbols:
+                        if analysis_universe_symbols:
                             recommendations = [
                                 rec for rec in recommendations
-                                if str(rec.get("symbol", "")).upper() in top_universe_symbols
+                                if str(rec.get("symbol", "")).upper() in analysis_universe_symbols
                             ]
             except Exception as e:
                 logger.warning(f"AI recommendation failed, using pattern matching: {e}")
@@ -2711,12 +3980,13 @@ async def get_ai_recommendations(
         if not recommendations:
             universe_rank = {
                 entry.get("crypto_id"): idx
-                for idx, entry in enumerate(top_universe)
+                for idx, entry in enumerate(analysis_universe)
                 if entry.get("crypto_id")
             }
 
-            if top_universe_ids:
-                trends = [trend for trend in trends if trend.get("crypto_id") in set(top_universe_ids)]
+            if analysis_universe_ids:
+                analysis_id_set = set(analysis_universe_ids)
+                trends = [trend for trend in trends if trend.get("crypto_id") in analysis_id_set]
 
             # Sort trends by performance
             sorted_trends = sorted(
@@ -2744,7 +4014,7 @@ async def get_ai_recommendations(
                     risk_description = "high volatility offering potential for significant gains"
                 
                 trend_id = trend.get('crypto_id', '')
-                mapped_entry = next((entry for entry in top_universe if entry.get("crypto_id") == trend_id), None)
+                mapped_entry = next((entry for entry in analysis_universe if entry.get("crypto_id") == trend_id), None)
                 symbol = str((mapped_entry or {}).get("symbol") or trend_id).upper()
                 trend_type = trend.get('trend', 'NEUTRAL')
                 price_change = trend.get('price_change_percent', 0)
@@ -2798,20 +4068,37 @@ async def get_ai_recommendations(
                 recommendations.append(recommendation)
 
         # Clamp final recommendation set strictly to top-universe symbols.
-        if top_universe_symbols:
+        if analysis_universe_symbols:
             recommendations = [
                 rec
                 for rec in recommendations
-                if str(rec.get("symbol", "")).upper() in top_universe_symbols
+                if str(rec.get("symbol", "")).upper() in analysis_universe_symbols
             ]
 
-        recommendations = [
-            {
-                **recommendation,
-                **derive_recommendation_action(recommendation)
-            }
-            for recommendation in recommendations
-        ]
+        trend_index: Dict[str, Dict[str, Any]] = {}
+        for trend in trends:
+            crypto_id = str(trend.get("crypto_id", "")).strip().lower()
+            mapped_symbol = _crypto_id_to_symbol(crypto_id)
+            if mapped_symbol:
+                trend_index[mapped_symbol.upper()] = trend
+
+        universe_index: Dict[str, Dict[str, Any]] = {}
+        for idx, entry in enumerate(analysis_universe, start=1):
+            symbol = str(entry.get("symbol", "")).upper().strip()
+            if symbol:
+                universe_index[symbol] = {
+                    "rank": idx,
+                    "score": _safe_float(entry.get("score", 0.0)),
+                }
+
+        normalized_recommendations: List[Dict[str, Any]] = []
+        for recommendation in recommendations:
+            normalized = dict(recommendation)
+            normalized.update(derive_recommendation_action(normalized))
+            normalized.update(derive_recommendation_scores(normalized, trend_index, universe_index))
+            normalized_recommendations.append(normalized)
+
+        recommendations = normalized_recommendations
         
         # Apply strategy and risk level filters
         filtered_recommendations = []
@@ -2849,7 +4136,7 @@ async def get_ai_recommendations(
         else:
             overall_risk = "LOW"
         
-        universe_size = len(top_universe_ids) if top_universe_ids else len(scoped_df['id'].unique())
+        universe_size = len(analysis_universe_ids) if analysis_universe_ids else len(scoped_df['id'].unique())
         reasoning = f"Based on {strategy.capitalize()} strategy over {timePeriod} period analyzing a multi-API top universe of {universe_size} cryptocurrencies. " \
                    f"Recommendations include a mix of stable and growth-oriented assets. " \
                    f"Diversification suggested across up to {count} assets."
@@ -2889,6 +4176,11 @@ async def get_ai_recommendations(
             "reasoning": reasoning,
             "risk_level": overall_risk,
             "candidate_universe": top_universe,
+            "recommendation_profile": {
+                "long_term": sum(1 for rec in recommendations[:count] if rec.get("strategy_bucket") == "long_term"),
+                "swing": sum(1 for rec in recommendations[:count] if rec.get("strategy_bucket") == "swing"),
+                "speculative": sum(1 for rec in recommendations[:count] if rec.get("strategy_bucket") == "speculative"),
+            },
             "timestamp": datetime.now(),
             "tier": subscription_tier,
             "limit_applied": tier_limit,
@@ -2902,7 +4194,10 @@ async def get_ai_recommendations(
             "api_calls_hourly_limit": api_calls_hourly_limit,
             "api_calls_used_this_hour": api_calls_used_this_hour,
             "api_calls_remaining_this_hour": api_calls_remaining_this_hour,
-            "hourly_reset_at": hourly_reset_at
+            "hourly_reset_at": hourly_reset_at,
+            "_debug": {
+                "news_provider": news_provider
+            }
         }
         
         # Cache response for anonymous users (300 second TTL for recommendations)
@@ -3207,6 +4502,23 @@ async def get_user_portfolio_data(current_user: str = Depends(get_current_user))
                 holding["investment_type"] = normalized_type
                 needs_normalization_save = True
 
+            quantity = float(holding.get("quantity", 0) or 0)
+            average_price = float(holding.get("average_price", holding.get("price", 0)) or 0)
+            if average_price <= 0:
+                total_value = float(holding.get("total_value", 0) or 0)
+                if quantity > 0 and total_value > 0:
+                    average_price = total_value / quantity
+
+            normalized_total_value = quantity * average_price if quantity > 0 and average_price > 0 else 0.0
+
+            if float(holding.get("average_price", 0) or 0) != average_price:
+                holding["average_price"] = average_price
+                needs_normalization_save = True
+
+            if float(holding.get("total_value", 0) or 0) != normalized_total_value:
+                holding["total_value"] = normalized_total_value
+                needs_normalization_save = True
+
         activity_log = portfolio.get("activity_log") or []
         for activity in activity_log:
             if "investment_type" not in activity:
@@ -3243,6 +4555,7 @@ async def get_user_portfolio_data(current_user: str = Depends(get_current_user))
             except Exception as e:
                 logger.debug(f"Could not fetch batched live prices: {e}")
 
+        market_value_total = 0.0
         for holding in holdings:
             symbol = str(holding.get("symbol", "")).upper()
             crypto_id = LIVE_PRICE_SYMBOLS.get(symbol)
@@ -3254,6 +4567,10 @@ async def get_user_portfolio_data(current_user: str = Depends(get_current_user))
                     holding["current_market_value"] = float(holding.get("quantity", 0) or 0) * current_price
                 except Exception as e:
                     logger.debug(f"Could not apply current price for {symbol}: {e}")
+
+            fallback_price = float(holding.get("current_price", holding.get("price", 0)) or 0)
+            fallback_market_value = float(holding.get("quantity", 0) or 0) * fallback_price
+            market_value_total += float(holding.get("current_market_value", fallback_market_value) or 0)
         
         # Calculate unrealized profit from live prices
         total_unrealized = 0.0
@@ -3282,6 +4599,12 @@ async def get_user_portfolio_data(current_user: str = Depends(get_current_user))
             "fake_money": fake_unrealized,
             "real_money": real_unrealized,
         }
+
+        portfolio["total_value"] = (
+            float(portfolio.get("cash", 0) or 0)
+            + float(portfolio.get("personal_buying_power", 0) or 0)
+            + market_value_total
+        )
         
         return portfolio
     
@@ -3411,6 +4734,226 @@ async def verify_profit_calculation(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Verification failed: {str(e)}"
+        )
+
+
+@app.get("/api/user/portfolio/reconciliation")
+async def reconcile_user_portfolio(
+    current_user: str = Depends(get_current_user)
+):
+    """Return a strict reconciliation report for portfolio P&L and valuation fields."""
+    try:
+        db = await get_db()
+        portfolio = await get_user_portfolio(db, current_user)
+
+        holdings = portfolio.get("holdings") or []
+        activity_log = portfolio.get("activity_log") or []
+
+        symbols = [
+            str(holding.get("symbol", "")).upper()
+            for holding in holdings
+            if str(holding.get("symbol", "")).upper()
+        ]
+        crypto_ids = [LIVE_PRICE_SYMBOLS.get(symbol) for symbol in symbols if LIVE_PRICE_SYMBOLS.get(symbol)]
+
+        live_prices = {}
+        if crypto_ids:
+            try:
+                live_prices = await get_multiple_prices_with_cache(crypto_ids)
+            except Exception as price_error:
+                logger.debug(f"Portfolio reconciliation live-price fetch failed: {price_error}")
+
+        computed_realized_from_activity = {
+            "overall": 0.0,
+            "fake_money": 0.0,
+            "real_money": 0.0,
+        }
+
+        for event in activity_log:
+            if event.get("event") != "sell":
+                continue
+
+            inv_type = str(event.get("investment_type", "real_money") or "real_money").lower()
+            inv_type = "fake_money" if inv_type == "fake_money" else "real_money"
+            realized_value = float(event.get("realized_profit", 0) or 0)
+
+            computed_realized_from_activity["overall"] += realized_value
+            computed_realized_from_activity[inv_type] += realized_value
+
+        totals = {
+            "cost_basis": 0.0,
+            "market_value": 0.0,
+            "unrealized_pnl": 0.0,
+            "fake_money": {
+                "cost_basis": 0.0,
+                "market_value": 0.0,
+                "unrealized_pnl": 0.0,
+                "count": 0,
+            },
+            "real_money": {
+                "cost_basis": 0.0,
+                "market_value": 0.0,
+                "unrealized_pnl": 0.0,
+                "count": 0,
+            },
+        }
+
+        per_holding = []
+
+        for holding in holdings:
+            symbol = str(holding.get("symbol", "")).upper()
+            inv_type = str(holding.get("investment_type", "real_money") or "real_money").lower()
+            inv_type = "fake_money" if inv_type == "fake_money" else "real_money"
+
+            quantity = float(holding.get("quantity", 0) or 0)
+            average_price = float(holding.get("average_price", holding.get("price", 0)) or 0)
+            if average_price <= 0 and quantity > 0:
+                legacy_total = float(holding.get("total_value", 0) or 0)
+                if legacy_total > 0:
+                    average_price = legacy_total / quantity
+
+            cost_basis = quantity * average_price if quantity > 0 and average_price > 0 else 0.0
+
+            current_price = float(holding.get("current_price", 0) or 0)
+            if current_price <= 0:
+                crypto_id = LIVE_PRICE_SYMBOLS.get(symbol)
+                price_data = live_prices.get(crypto_id) if crypto_id else None
+                if price_data and price_data.get("price"):
+                    current_price = float(price_data.get("price", 0) or 0)
+
+            if current_price <= 0:
+                current_price = float(holding.get("price", 0) or 0)
+
+            market_value = quantity * current_price if quantity > 0 and current_price > 0 else 0.0
+            unrealized_pnl = market_value - cost_basis
+
+            stored_total_value = float(holding.get("total_value", 0) or 0)
+
+            totals["cost_basis"] += cost_basis
+            totals["market_value"] += market_value
+            totals["unrealized_pnl"] += unrealized_pnl
+
+            totals[inv_type]["cost_basis"] += cost_basis
+            totals[inv_type]["market_value"] += market_value
+            totals[inv_type]["unrealized_pnl"] += unrealized_pnl
+            totals[inv_type]["count"] += 1
+
+            per_holding.append({
+                "symbol": symbol,
+                "investment_type": inv_type,
+                "quantity": quantity,
+                "average_price": average_price,
+                "cost_basis": cost_basis,
+                "current_price": current_price,
+                "market_value": market_value,
+                "unrealized_pnl": unrealized_pnl,
+                "stored_total_value": stored_total_value,
+                "stored_cost_basis_delta": stored_total_value - cost_basis,
+                "formula": f"({quantity} * {current_price}) - ({quantity} * {average_price})",
+            })
+
+        computed_unrealized = {
+            "overall": totals["unrealized_pnl"],
+            "fake_money": totals["fake_money"]["unrealized_pnl"],
+            "real_money": totals["real_money"]["unrealized_pnl"],
+        }
+
+        stored_realized = portfolio.get("realized_pnl") or {
+            "overall": 0.0,
+            "fake_money": 0.0,
+            "real_money": 0.0,
+        }
+        stored_unrealized = portfolio.get("unrealized_pnl") or {
+            "overall": 0.0,
+            "fake_money": 0.0,
+            "real_money": 0.0,
+        }
+
+        cash = float(portfolio.get("cash", 0) or 0)
+        personal_buying_power = float(portfolio.get("personal_buying_power", 0) or 0)
+        stored_total_value = float(portfolio.get("total_value", 0) or 0)
+        computed_total_value = cash + personal_buying_power + totals["market_value"]
+
+        tolerance = 0.01
+
+        def build_delta(stored: float, computed: float) -> Dict[str, Any]:
+            delta = stored - computed
+            return {
+                "stored": stored,
+                "computed": computed,
+                "delta": delta,
+                "matches": abs(delta) <= tolerance,
+            }
+
+        reconciliation = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "user_id": current_user,
+            "tolerance": tolerance,
+            "balances": {
+                "cash": cash,
+                "personal_buying_power": personal_buying_power,
+            },
+            "holdings": per_holding,
+            "summary": {
+                "holdings_count": len(per_holding),
+                "cost_basis": totals["cost_basis"],
+                "market_value": totals["market_value"],
+                "unrealized_pnl": totals["unrealized_pnl"],
+                "by_type": {
+                    "fake_money": totals["fake_money"],
+                    "real_money": totals["real_money"],
+                },
+            },
+            "checks": {
+                "realized_pnl": {
+                    "overall": build_delta(
+                        float(stored_realized.get("overall", 0) or 0),
+                        computed_realized_from_activity["overall"],
+                    ),
+                    "fake_money": build_delta(
+                        float(stored_realized.get("fake_money", 0) or 0),
+                        computed_realized_from_activity["fake_money"],
+                    ),
+                    "real_money": build_delta(
+                        float(stored_realized.get("real_money", 0) or 0),
+                        computed_realized_from_activity["real_money"],
+                    ),
+                },
+                "unrealized_pnl": {
+                    "overall": build_delta(
+                        float(stored_unrealized.get("overall", 0) or 0),
+                        computed_unrealized["overall"],
+                    ),
+                    "fake_money": build_delta(
+                        float(stored_unrealized.get("fake_money", 0) or 0),
+                        computed_unrealized["fake_money"],
+                    ),
+                    "real_money": build_delta(
+                        float(stored_unrealized.get("real_money", 0) or 0),
+                        computed_unrealized["real_money"],
+                    ),
+                },
+                "portfolio_total_value": build_delta(
+                    stored_total_value,
+                    computed_total_value,
+                ),
+            },
+        }
+
+        logger.info(
+            "✅ Portfolio reconciliation generated for %s (holdings=%s)",
+            current_user,
+            len(per_holding),
+        )
+
+        return reconciliation
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Portfolio reconciliation error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Portfolio reconciliation failed: {str(e)}",
         )
 
 
@@ -3917,16 +5460,24 @@ async def user_invest_crypto(
         # Get current portfolio
         portfolio = await get_user_portfolio(db, current_user)
         
-        # Update cash
-        total_value = invest_data.get("total_value", 0)
-        portfolio["cash"] = portfolio.get("cash", 100000.0) - total_value
+        # Update cash and persist before holding mutation so the value is not lost.
+        total_value = float(invest_data.get("total_value", 0) or 0)
+        portfolio["cash"] = float(portfolio.get("cash", 100000.0) or 0) - total_value
+        if "realized_pnl" not in portfolio:
+            portfolio["realized_pnl"] = {
+                "overall": 0.0,
+                "fake_money": 0.0,
+                "real_money": 0.0,
+            }
+        await update_user_portfolio(db, current_user, portfolio)
         
         # Add holding
         holding = {
             "symbol": invest_data.get("symbol", "").upper(),
             "quantity": invest_data.get("quantity", 0),
             "price": invest_data.get("price", 0),
-            "total_value": total_value
+            "total_value": total_value,
+            "investment_type": "real_money"
         }
         
         await add_user_holding(db, current_user, holding)
@@ -4729,6 +6280,20 @@ async def get_db_async():
     return await get_db()
 
 app.include_router(
+    create_email_verification_router(
+        get_current_user_dependency=get_current_user,
+        get_db_fn=get_db_async,
+    )
+)
+
+app.include_router(
+    create_promo_router(
+        get_current_user_dependency=get_current_user,
+        get_db_fn=get_db_async,
+    )
+)
+
+app.include_router(
     create_auto_trading_router(
         get_current_user_dependency=get_current_user,
         get_db_fn=get_db_async
@@ -4741,6 +6306,8 @@ app.include_router(
         get_current_user_dependency=get_current_user
     )
 )
+
+app.include_router(ads_router)
 
 
 async def ensure_customer_subscription(db, user_id: str) -> Dict:

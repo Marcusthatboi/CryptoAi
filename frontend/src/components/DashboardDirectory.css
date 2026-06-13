@@ -1,0 +1,76 @@
+.dashboard-directory {
+  position: sticky;
+  top: 20px;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 16px 10px;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.07);
+  border: 1px solid #e5eaf3;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.dashboard-directory-title {
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #667eea;
+  padding: 0 6px 10px;
+  border-bottom: 2px solid #f0f3fb;
+  margin-bottom: 8px;
+}
+
+.dashboard-directory-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dashboard-directory-item {
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 9px 8px;
+  border-radius: 9px;
+  font-size: 13px;
+  color: #4b5563;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
+  min-height: 40px;
+}
+
+.dashboard-directory-item:hover {
+  background: #eef2ff;
+  color: #667eea;
+  transform: translateX(2px);
+}
+
+.dashboard-directory-item.active {
+  background: linear-gradient(135deg, #eef2ff 0%, #e8d5f7 100%);
+  color: #667eea;
+  font-weight: 700;
+  border-left: 3px solid #667eea;
+}
+
+.directory-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+
+.directory-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}

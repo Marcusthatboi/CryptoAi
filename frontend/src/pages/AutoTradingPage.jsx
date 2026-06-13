@@ -1,10 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { cryptoAPI } from '../utils/api';
+import { API_BASE } from '../utils/backendConfig';
 import '../styles/AutoTradingPage.css';
 
-// Use localhost:8002 for local dev, otherwise use VITE_API_BASE_URL or default to localhost:8002
-const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-const API_BASE = isLocalDev ? 'http://localhost:8002' : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002');
+const SYMBOL_TO_CRYPTO_ID = {
+  BTC: 'bitcoin',
+  ETH: 'ethereum',
+  SOL: 'solana',
+  XRP: 'ripple',
+  ADA: 'cardano',
+  DOGE: 'dogecoin',
+  DOT: 'polkadot',
+  MATIC: 'polygon',
+  TON: 'toncoin',
+  LTC: 'litecoin'
+};
+
+const resolveCryptoIdFromPair = (rawSymbol) => {
+  const normalized = String(rawSymbol || '').trim().toUpperCase();
+  const base = normalized.split('/')[0].replace('USDT', '').replace('USD', '');
+  return SYMBOL_TO_CRYPTO_ID[base] || base.toLowerCase();
+};
+
+const toFiniteNumber = (value, fallback = 0) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
 
 export default function AutoTradingPage() {
   const [warnings, setWarnings] = useState([]);
@@ -17,6 +39,8 @@ export default function AutoTradingPage() {
   const [activeTab, setActiveTab] = useState('warnings'); // warnings, trade, active
   const [activeTrades, setActiveTrades] = useState([]);
   const [loadingTrades, setLoadingTrades] = useState(false);
+  const [tradeActionLoading, setTradeActionLoading] = useState({});
+  const [reconciliationSummary, setReconciliationSummary] = useState(null);
   const [tradeData, setTradeData] = useState({
     symbol: 'BTC/USD',
     action: 'BUY',
@@ -31,10 +55,13 @@ export default function AutoTradingPage() {
 
   useEffect(() => {
     checkSubscription();
+  }, []);
+
+  useEffect(() => {
     if (subscription?.tier === 'premium') {
       loadWarnings();
     }
-  }, []);
+  }, [subscription?.tier]);
 
   useEffect(() => {
     // Load active trades when switching to the active trades tab
@@ -74,11 +101,117 @@ export default function AutoTradingPage() {
         headers: { Authorization: `Bearer ${token}` }
       });
       setActiveTrades(response.data.active_trades || []);
+      setReconciliationSummary(response.data.reconciliation || null);
     } catch (error) {
       console.error('Error fetching active trades:', error);
       setActiveTrades([]);
+      setReconciliationSummary(null);
     } finally {
       setLoadingTrades(false);
+    }
+  };
+
+  const handleReconcileTrades = async () => {
+    setLoadingTrades(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        `${API_BASE}/api/auto-trading/trades/reconcile`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const result = response.data?.result;
+      if (result) {
+        setReconciliationSummary(result);
+        alert(`Reconciled trades: checked ${result.checked}, updated ${result.updated}, failed ${result.failed}`);
+      }
+      await fetchActiveTrades();
+    } catch (error) {
+      console.error('Error reconciling trades:', error);
+      alert(error.response?.data?.detail || 'Failed to reconcile trade statuses');
+    } finally {
+      setLoadingTrades(false);
+    }
+  };
+
+  const setTradeLoading = (orderId, loadingState) => {
+    setTradeActionLoading(prev => ({ ...prev, [orderId]: loadingState }));
+  };
+
+  const handleCloseTrade = async (trade) => {
+    const orderId = trade?.order_id;
+    if (!orderId) {
+      alert('Missing order id for selected trade');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Close trade ${orderId} now? This will submit a market order to close the position.`
+    );
+    if (!confirmed) return;
+
+    setTradeLoading(orderId, true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        `${API_BASE}/api/auto-trading/trades/${encodeURIComponent(orderId)}/close`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert(response.data?.message || 'Trade closed successfully');
+      await fetchActiveTrades();
+    } catch (error) {
+      console.error('Error closing trade:', error);
+      alert(error.response?.data?.detail || 'Failed to close trade');
+    } finally {
+      setTradeLoading(orderId, false);
+    }
+  };
+
+  const handleAdjustStops = async (trade) => {
+    const orderId = trade?.order_id;
+    if (!orderId) {
+      alert('Missing order id for selected trade');
+      return;
+    }
+
+    const stopDefault = toFiniteNumber(trade?.stop_loss, 0);
+    const takeProfitDefault = toFiniteNumber(trade?.take_profit, 0);
+
+    const stopInput = window.prompt(
+      `Enter new stop-loss for ${trade.symbol || orderId}:`,
+      stopDefault > 0 ? stopDefault.toString() : ''
+    );
+    if (stopInput === null) return;
+
+    const takeProfitInput = window.prompt(
+      `Enter new take-profit for ${trade.symbol || orderId}:`,
+      takeProfitDefault > 0 ? takeProfitDefault.toString() : ''
+    );
+    if (takeProfitInput === null) return;
+
+    const stopLoss = Number(stopInput);
+    const takeProfit = Number(takeProfitInput);
+    if (!Number.isFinite(stopLoss) || !Number.isFinite(takeProfit) || stopLoss <= 0 || takeProfit <= 0) {
+      alert('Please enter valid numeric values greater than 0 for stop-loss and take-profit.');
+      return;
+    }
+
+    setTradeLoading(orderId, true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.patch(
+        `${API_BASE}/api/auto-trading/trades/${encodeURIComponent(orderId)}/stops`,
+        { stop_loss: stopLoss, take_profit: takeProfit },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert(response.data?.message || 'Trade stops updated');
+      await fetchActiveTrades();
+    } catch (error) {
+      console.error('Error adjusting trade stops:', error);
+      alert(error.response?.data?.detail || 'Failed to adjust stops');
+    } finally {
+      setTradeLoading(orderId, false);
     }
   };
 
@@ -99,12 +232,29 @@ export default function AutoTradingPage() {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
+      const cryptoId = resolveCryptoIdFromPair(tradeData.symbol);
+      const [priceResponse, portfolioResponse] = await Promise.all([
+        cryptoAPI.getPrice(cryptoId),
+        cryptoAPI.getUserPortfolio({ timeout: 20000, retryAttempts: 0 })
+      ]);
+
+      const currentPrice = toFiniteNumber(priceResponse?.data?.price, 0);
+      const portfolioValue = toFiniteNumber(portfolioResponse?.data?.total_value, 0);
+
+      if (currentPrice <= 0) {
+        throw new Error(`Unable to resolve a live price for ${tradeData.symbol}`);
+      }
+
+      if (portfolioValue <= 0) {
+        throw new Error('Unable to resolve portfolio value for risk assessment');
+      }
+
       const response = await axios.post(`${API_BASE}/api/auto-trading/assess-risk`, {
         symbol: tradeData.symbol,
         action: tradeData.action,
         quantity: tradeData.quantity,
-        current_price: 50000, // Would come from real market data
-        portfolio_value: 100000, // Would come from user portfolio
+        current_price: currentPrice,
+        portfolio_value: portfolioValue,
         market_volatility: 0.05
       }, {
         headers: { Authorization: `Bearer ${token}` }
@@ -505,6 +655,14 @@ export default function AutoTradingPage() {
           <p style={{ color: '#ff6600' }}>
             ⚠️ Active trades will execute automatically. Be prepared to intervene.
           </p>
+          <button className="btn btn-secondary" onClick={handleReconcileTrades} disabled={loadingTrades}>
+            {loadingTrades ? 'Reconciling...' : 'Reconcile Exchange Status'}
+          </button>
+          {reconciliationSummary && (
+            <p style={{ fontSize: '0.9em', color: '#9ca3af' }}>
+              Last reconciliation: checked {reconciliationSummary.checked}, updated {reconciliationSummary.updated}, failed {reconciliationSummary.failed}
+            </p>
+          )}
           
           {loadingTrades ? (
             <p>Loading active trades...</p>
@@ -527,7 +685,7 @@ export default function AutoTradingPage() {
                       </span>
                     </div>
                     <div className="trade-status" style={{ 
-                      color: trade.status === 'open' ? '#4ade80' : '#fbbf24'
+                      color: trade.status === 'open' ? '#4ade80' : (trade.status === 'close_submitted' ? '#f97316' : '#fbbf24')
                     }}>
                       {trade.status.toUpperCase()}
                     </div>
@@ -544,11 +702,11 @@ export default function AutoTradingPage() {
                     </div>
                     <div className="detail-row">
                       <span>Stop Loss:</span>
-                      <span style={{ color: '#f87171' }}>${trade.stop_loss.toFixed(2)}</span>
+                      <span style={{ color: '#f87171' }}>${toFiniteNumber(trade.stop_loss).toFixed(2)}</span>
                     </div>
                     <div className="detail-row">
                       <span>Take Profit:</span>
-                      <span style={{ color: '#4ade80' }}>${trade.take_profit.toFixed(2)}</span>
+                      <span style={{ color: '#4ade80' }}>${toFiniteNumber(trade.take_profit).toFixed(2)}</span>
                     </div>
                     <div className="detail-row">
                       <span>Entry Price:</span>
@@ -565,11 +723,21 @@ export default function AutoTradingPage() {
                   </div>
                   
                   <div className="trade-actions">
-                    <button className="close-button" onClick={() => alert('Close trade feature coming soon')}>
-                      Close Position
+                    <button
+                      className="close-button"
+                      disabled={!!tradeActionLoading[trade.order_id] || trade.status === 'close_submitted'}
+                      onClick={() => handleCloseTrade(trade)}
+                    >
+                      {tradeActionLoading[trade.order_id]
+                        ? 'Working...'
+                        : (trade.status === 'close_submitted' ? 'Close Pending Fill' : 'Close Position')}
                     </button>
-                    <button className="adjust-button" onClick={() => alert('Adjust stops feature coming soon')}>
-                      Adjust Stops
+                    <button
+                      className="adjust-button"
+                      disabled={!!tradeActionLoading[trade.order_id] || trade.status === 'close_submitted'}
+                      onClick={() => handleAdjustStops(trade)}
+                    >
+                      {tradeActionLoading[trade.order_id] ? 'Working...' : 'Adjust Stops'}
                     </button>
                   </div>
                 </div>

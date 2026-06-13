@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { cryptoAPI } from '../utils/api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import ActivateAutoTradingBtn from './ActivateAutoTradingBtn'
@@ -28,22 +28,50 @@ const getSymbolFromCryptoId = (cryptoId) => {
 }
 
 export default function PriceCard({ cryptoId }) {
+  const cardRef = useRef(null)
+  const hasFetchedRef = useRef(false)
   const [price, setPrice] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [isVisible, setIsVisible] = useState(false)
   const [autoTradingActive, setAutoTradingActive] = useState(false)
   const { isConnected, message, subscribe, unsubscribe } = useWebSocket()
 
+  useEffect(() => {
+    const node = cardRef.current
+    if (!node) {
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry && entry.isIntersecting) {
+          setIsVisible(true)
+          observer.unobserve(node)
+        }
+      },
+      {
+        root: null,
+        rootMargin: '220px',
+        threshold: 0.05
+      }
+    )
+
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
   // Subscribe to price updates for this crypto
   useEffect(() => {
-    if (isConnected) {
+    if (isConnected && isVisible) {
       subscribe(cryptoId.toUpperCase())
 
       return () => {
         unsubscribe(cryptoId.toUpperCase())
       }
     }
-  }, [isConnected, cryptoId, subscribe, unsubscribe])
+  }, [isConnected, isVisible, cryptoId, subscribe, unsubscribe])
 
   // Listen for price updates via WebSocket
   useEffect(() => {
@@ -55,42 +83,44 @@ export default function PriceCard({ cryptoId }) {
 
   // Initial load
   useEffect(() => {
+    if (!isVisible || hasFetchedRef.current) {
+      return
+    }
+
+    hasFetchedRef.current = true
     fetchPrice()
-  }, [cryptoId])
+  }, [cryptoId, isVisible])
 
   const fetchPrice = async () => {
     try {
       setLoading(true)
+      setError(null)
       const response = await cryptoAPI.getPrice(cryptoId)
       setPrice(response.data)
-      setError(null)
     } catch (err) {
-      console.warn('Failed to fetch price, using mock data:', err)
-      // Use mock price data when API fails
-      const mockPrices = {
-        bitcoin: { id: 'bitcoin', price: 45339.26, price_change_24h: -0.33, market_cap: 900000000000 },
-        ethereum: { id: 'ethereum', price: 2540.15, price_change_24h: 1.25, market_cap: 305000000000 },
-        cardano: { id: 'cardano', price: 0.6785, price_change_24h: 0.95, market_cap: 25000000000 },
-        solana: { id: 'solana', price: 112.45, price_change_24h: 2.15, market_cap: 48000000000 },
-        ripple: { id: 'ripple', price: 0.5125, price_change_24h: -0.85, market_cap: 28000000000 }
+      const status = err?.response?.status
+      if (status === 404) {
+        setError('Unavailable')
+      } else {
+        console.warn('Failed to fetch live price:', err)
+        setError('Live quote unavailable')
       }
-      setPrice(mockPrices[cryptoId.toLowerCase()] || mockPrices.bitcoin)
-      setError(null)
     } finally {
       setLoading(false)
     }
   }
 
-  if (loading && !price) return <div className="price-card loading">Loading...</div>
-  if (error) return <div className="price-card error">{error}</div>
-  if (!price) return <div className="price-card">No data</div>
+  if (!isVisible) return <div ref={cardRef} className="price-card loading">Loading...</div>
+  if (loading && !price) return <div ref={cardRef} className="price-card loading">Loading...</div>
+  if (error) return <div ref={cardRef} className="price-card error">{error}</div>
+  if (!price) return <div ref={cardRef} className="price-card">No data</div>
 
   const change = price.price_change_24h || 0
   const changeClass = change >= 0 ? 'positive' : 'negative'
   const changeSymbol = change >= 0 ? '📈' : '📉'
 
   return (
-    <div className="price-card">
+    <div ref={cardRef} className="price-card">
       <div className="card-header">
         <h3>{price.id.toUpperCase()}</h3>
         <div className="card-header-right">

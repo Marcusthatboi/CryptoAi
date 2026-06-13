@@ -61,6 +61,11 @@ def get_client() -> Client:
     if _client is not None and _client_config == current_config:
         return _client
 
+    if (api_key and api_key.startswith("your_")) or (api_secret and api_secret.startswith("your_")):
+        raise BinanceError(
+            "Binance credentials are placeholder values. Set real BINANCE_API_KEY and BINANCE_API_SECRET in .env"
+        )
+
     if not api_key or not api_secret:
         raise BinanceError(
             "Binance credentials not configured. Set BINANCE_API_KEY and BINANCE_API_SECRET in .env"
@@ -83,8 +88,8 @@ def get_client() -> Client:
 def is_connected() -> bool:
     """Check if Binance connection is active."""
     try:
-        client = get_client()
-        client.get_server_time()
+        # Use a signed endpoint so status reflects credential validity, not just public API reachability.
+        get_account_info()
         return True
     except:
         return False
@@ -250,19 +255,28 @@ def get_ticker(symbol: str) -> Dict:
     try:
         client = get_client()
         ticker = client.get_symbol_ticker(symbol=symbol.upper())
-        stats = client.get_24hr_ticker_price_change_statistics(symbol=symbol.upper())
+        stats = client.get_ticker(symbol=symbol.upper())
+
+        bid_value = stats.get("bidPrice") or stats.get("bid") or ticker.get("price") or 0
+        ask_value = stats.get("askPrice") or stats.get("ask") or ticker.get("price") or 0
+        high_value = stats.get("highPrice") or stats.get("high") or ticker.get("price") or 0
+        low_value = stats.get("lowPrice") or stats.get("low") or ticker.get("price") or 0
+        volume_value = stats.get("volume") or 0
+        quote_volume_value = stats.get("quoteAssetVolume") or stats.get("quoteVolume") or 0
+        change_value = stats.get("priceChange") or 0
+        change_percent_value = stats.get("priceChangePercent") or 0
         
         return {
             "symbol": symbol.upper(),
             "price": float(ticker["price"]),
-            "bid": float(stats["bidPrice"]),
-            "ask": float(stats["askPrice"]),
-            "high_24h": float(stats["highPrice"]),
-            "low_24h": float(stats["lowPrice"]),
-            "volume": float(stats["volume"]),
-            "quote_volume": float(stats["quoteAssetVolume"]),
-            "price_change": float(stats["priceChange"]),
-            "price_change_percent": float(stats["priceChangePercent"]),
+            "bid": float(bid_value),
+            "ask": float(ask_value),
+            "high_24h": float(high_value),
+            "low_24h": float(low_value),
+            "volume": float(volume_value),
+            "quote_volume": float(quote_volume_value),
+            "price_change": float(change_value),
+            "price_change_percent": float(change_percent_value),
             "timestamp": datetime.now().isoformat()
         }
     
@@ -326,7 +340,7 @@ def get_top_gainers(limit: int = 10) -> List[Dict]:
         gainers = []
         for symbol in symbols[:limit * 3]:  # Get more to filter
             try:
-                stats = client.get_24hr_ticker_price_change_statistics(symbol=symbol)
+                stats = client.get_ticker(symbol=symbol)
                 change_percent = float(stats["priceChangePercent"])
                 
                 gainers.append({

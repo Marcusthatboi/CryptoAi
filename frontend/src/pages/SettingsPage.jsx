@@ -4,6 +4,8 @@ import { useAuth } from '../hooks/useAuth'
 import { cryptoAPI } from '../utils/api'
 import { encryptAESGCM } from '../utils/encryption'
 import './SettingsPage.css'
+import axios from 'axios'
+import { API_BASE } from '../utils/backendConfig'
 
 const formatDate = (dateString) => {
   if (!dateString) return 'N/A'
@@ -39,9 +41,21 @@ export default function SettingsPage() {
   })
   const [settingsMessage, setSettingsMessage] = useState({ type: '', text: '' })
 
+  // Exchange keys state
+  const [registeredKeys, setRegisteredKeys] = useState([])
+  const [keyForm, setKeyForm] = useState({ exchange: 'binance_us', public_key: '', label: '' })
+  const [keyMessage, setKeyMessage] = useState({ type: '', text: '' })
+  const [keyLoading, setKeyLoading] = useState(false)
+
+  const SUPPORTED_EXCHANGES = ['binance', 'binance_us', 'alpaca', 'coinbase', 'kraken', 'bybit']
+
   useEffect(() => {
     fetchAllData()
   }, [])
+
+  useEffect(() => {
+    if (activeTab === 'exchange-keys') fetchRegisteredKeys()
+  }, [activeTab])
 
   const fetchAllData = async () => {
     try {
@@ -93,6 +107,50 @@ export default function SettingsPage() {
       setError('Failed to load settings data. Please try again.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchRegisteredKeys = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      const r = await axios.get(`${API_BASE}/api/user/exchange-keys/`, { headers: { Authorization: `Bearer ${token}` } })
+      setRegisteredKeys(r.data.keys || [])
+    } catch { setRegisteredKeys([]) }
+  }
+
+  const handleRegisterKey = async (e) => {
+    e.preventDefault()
+    if (!keyForm.public_key.trim()) {
+      setKeyMessage({ type: 'error', text: 'Public key is required' })
+      return
+    }
+    setKeyLoading(true)
+    setKeyMessage({ type: '', text: '' })
+    try {
+      const token = localStorage.getItem('token')
+      await axios.post(`${API_BASE}/api/user/exchange-keys/register`, keyForm, { headers: { Authorization: `Bearer ${token}` } })
+      setKeyMessage({ type: 'success', text: `Public key for ${keyForm.exchange} registered successfully` })
+      setKeyForm({ exchange: 'binance_us', public_key: '', label: '' })
+      await fetchRegisteredKeys()
+    } catch (err) {
+      setKeyMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to register key' })
+    } finally {
+      setKeyLoading(false)
+    }
+  }
+
+  const handleDeleteKey = async (exchange) => {
+    if (!window.confirm(`Remove registered public key for ${exchange}?`)) return
+    try {
+      const token = localStorage.getItem('token')
+      await axios.delete(`${API_BASE}/api/user/exchange-keys/`, {
+        data: { exchange },
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      setKeyMessage({ type: 'success', text: `Public key for ${exchange} removed` })
+      await fetchRegisteredKeys()
+    } catch (err) {
+      setKeyMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to remove key' })
     }
   }
 
@@ -223,6 +281,12 @@ export default function SettingsPage() {
             onClick={() => setActiveTab('portfolio')}
           >
             💼 Portfolio
+          </button>
+          <button
+            className={`tab-btn ${activeTab === 'exchange-keys' ? 'active' : ''}`}
+            onClick={() => setActiveTab('exchange-keys')}
+          >
+            🔑 Exchange Keys
           </button>
         </div>
 
@@ -423,6 +487,96 @@ export default function SettingsPage() {
         )}
 
         {/* Portfolio Tab */}
+        {/* Exchange Keys Tab */}
+        {activeTab === 'exchange-keys' && (
+          <div className="tab-content">
+            <h3 style={{ color: '#a78bfa', marginBottom: 8 }}>🔑 Exchange Public Key Registration</h3>
+            <p style={{ color: '#9ca3af', fontSize: '0.9em', marginBottom: 20 }}>
+              Register your exchange API public key so DaCryptoBeast can verify your account linkage.
+              <strong style={{ color: '#fbbf24' }}> Never submit your secret key.</strong>
+            </p>
+
+            {keyMessage.text && (
+              <div style={{
+                background: keyMessage.type === 'success' ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)',
+                border: `1px solid ${keyMessage.type === 'success' ? '#4ade80' : '#f87171'}`,
+                borderRadius: 8, padding: '10px 16px', marginBottom: 16,
+                color: keyMessage.type === 'success' ? '#4ade80' : '#f87171', fontSize: '0.9em'
+              }}>
+                {keyMessage.text}
+              </div>
+            )}
+
+            <form onSubmit={handleRegisterKey} style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 520 }}>
+              <div className="form-group">
+                <label style={{ color: '#d1d5db' }}>Exchange</label>
+                <select
+                  value={keyForm.exchange}
+                  onChange={e => setKeyForm(p => ({ ...p, exchange: e.target.value }))}
+                  style={{ background: '#1f2937', color: 'white', border: '1px solid #374151', borderRadius: 6, padding: '8px 12px', width: '100%' }}
+                >
+                  {SUPPORTED_EXCHANGES.map(ex => (
+                    <option key={ex} value={ex}>{ex.replace('_', '.').toUpperCase()}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label style={{ color: '#d1d5db' }}>API Public Key <span style={{ color: '#f87171' }}>*</span></label>
+                <input
+                  type="text"
+                  placeholder="Your exchange API public key (not secret)"
+                  value={keyForm.public_key}
+                  onChange={e => setKeyForm(p => ({ ...p, public_key: e.target.value }))}
+                  style={{ background: '#1f2937', color: 'white', border: '1px solid #374151', borderRadius: 6, padding: '8px 12px', width: '100%' }}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label style={{ color: '#d1d5db' }}>Label <span style={{ opacity: 0.5 }}>(optional)</span></label>
+                <input
+                  type="text"
+                  placeholder="e.g. main trading key"
+                  value={keyForm.label}
+                  onChange={e => setKeyForm(p => ({ ...p, label: e.target.value }))}
+                  style={{ background: '#1f2937', color: 'white', border: '1px solid #374151', borderRadius: 6, padding: '8px 12px', width: '100%' }}
+                />
+              </div>
+
+              <button type="submit" disabled={keyLoading}
+                style={{ background: '#7c3aed', color: 'white', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 600, cursor: 'pointer', alignSelf: 'flex-start' }}>
+                {keyLoading ? 'Registering...' : '🔗 Register Public Key'}
+              </button>
+            </form>
+
+            {registeredKeys.length > 0 && (
+              <div style={{ marginTop: 32 }}>
+                <h4 style={{ color: '#d1d5db', marginBottom: 12 }}>Registered Keys</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {registeredKeys.map(k => (
+                    <div key={k.exchange} style={{
+                      background: '#1f2937', borderRadius: 10, padding: '12px 16px',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap'
+                    }}>
+                      <div>
+                        <strong style={{ color: '#a78bfa' }}>{k.exchange.replace('_', '.').toUpperCase()}</strong>
+                        {k.label && <span style={{ color: '#9ca3af', fontSize: '0.85em', marginLeft: 8 }}>({k.label})</span>}
+                        <div style={{ color: '#6b7280', fontSize: '0.82em', marginTop: 2, fontFamily: 'monospace' }}>{k.public_key_masked}</div>
+                        {k.registered_at && <div style={{ color: '#6b7280', fontSize: '0.78em' }}>Registered {new Date(k.registered_at).toLocaleString()}</div>}
+                      </div>
+                      <button onClick={() => handleDeleteKey(k.exchange)}
+                        style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid #f87171', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: '0.85em' }}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'portfolio' && portfolio && (
           <div className="tab-content">
             <h3>💼 Portfolio Overview</h3>
@@ -492,3 +646,4 @@ export default function SettingsPage() {
     </div>
   )
 }
+

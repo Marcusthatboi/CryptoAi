@@ -6,9 +6,11 @@ REST API endpoints for AI-powered automated trading with risk management and war
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from copy import deepcopy
+from pydantic import BaseModel
 
 from backend.auto_trading import (
     AutoTradeRequest,
@@ -23,6 +25,351 @@ from backend.db import get_db
 from backend.subscription import get_user_subscription
 
 logger = logging.getLogger(__name__)
+
+
+ACTIVE_TRADE_STATUSES = {"submitted", "open", "pending"}
+ACTIVE_TRADE_VISIBLE_STATUSES = {"submitted", "open", "pending", "close_submitted"}
+TERMINAL_EXCHANGE_STATUSES = {"FILLED", "CANCELED", "REJECTED", "EXPIRED", "EXPIRED_IN_MATCH"}
+
+RECONCILIATION_RUNTIME_METRICS: Dict[str, Any] = {
+    "total_runs": 0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "consecutive_failure_runs": 0,
+    "total_users_checked": 0,
+    "total_users_failed": 0,
+    "total_trades_checked": 0,
+    "total_trades_updated": 0,
+    "total_trade_failures": 0,
+    "last_run_at": None,
+    "last_success_at": None,
+    "last_failure_at": None,
+    "last_duration_seconds": None,
+    "last_result": None,
+    "last_error": None,
+    "last_stale_summary": None,
+}
+
+
+def normalize_binance_symbol(raw_symbol: str) -> str:
+    """Normalize user symbol input into Binance-US style symbols (e.g. BTCUSDT)."""
+    normalized = str(raw_symbol or "").upper().strip()
+    if not normalized:
+        raise ValueError("Symbol is required")
+
+    normalized = normalized.replace(" ", "").replace("-", "").replace("_", "").replace("/", "")
+
+    if normalized.endswith("USDT"):
+        return normalized
+    if normalized.endswith("USD"):
+        base = normalized[:-3]
+        if not base:
+            raise ValueError("Invalid symbol")
+        return f"{base}USDT"
+
+    return f"{normalized}USDT"
+
+
+class AdjustStopsRequest(BaseModel):
+    stop_loss: float
+    take_profit: float
+
+
+def validate_stop_take_profit(
+    action: str,
+    stop_loss: float,
+    take_profit: float,
+    current_price: float,
+    *,
+    min_distance_ratio: float = 0.001,
+) -> Optional[str]:
+    """Validate stop-loss/take-profit placement relative to current market price."""
+    if stop_loss <= 0 or take_profit <= 0:
+        return "stop_loss and take_profit must be greater than 0"
+    if current_price <= 0:
+        return "Unable to validate stops because current market price is unavailable"
+
+    normalized_action = str(action or "").upper()
+    if normalized_action not in {"BUY", "SELL"}:
+        return "Action must be BUY or SELL"
+
+    min_distance = current_price * min_distance_ratio
+
+    if normalized_action == "BUY":
+        if not stop_loss < current_price:
+            return "For BUY trades, stop_loss must be below the current market price"
+        if not take_profit > current_price:
+            return "For BUY trades, take_profit must be above the current market price"
+        if (current_price - stop_loss) < min_distance:
+            return "stop_loss is too close to market price"
+        if (take_profit - current_price) < min_distance:
+            return "take_profit is too close to market price"
+    else:
+        if not stop_loss > current_price:
+            return "For SELL trades, stop_loss must be above the current market price"
+        if not take_profit < current_price:
+            return "For SELL trades, take_profit must be below the current market price"
+        if (stop_loss - current_price) < min_distance:
+            return "stop_loss is too close to market price"
+        if (current_price - take_profit) < min_distance:
+            return "take_profit is too close to market price"
+
+    return None
+
+
+def get_current_market_price(symbol: str) -> float:
+    """Fetch current market price for a symbol from Binance ticker endpoint."""
+    from backend.binance_api import get_ticker
+
+    normalized_symbol = normalize_binance_symbol(symbol)
+    ticker = get_ticker(normalized_symbol)
+    return float((ticker or {}).get("price") or 0)
+
+
+def place_market_order_with_retry(
+    *,
+    symbol: str,
+    side: str,
+    quantity: float,
+    max_attempts: int = 3,
+) -> Tuple[Dict[str, Any], int]:
+    """Place a market order with bounded retries for transient exchange failures."""
+    from backend.binance_api import place_order as place_binance_order
+
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            order = place_binance_order(
+                symbol=symbol,
+                side=side,
+                order_type="MARKET",
+                quantity=quantity,
+            )
+            return order, attempt
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "Market order attempt %s/%s failed for %s %s x%s: %s",
+                attempt,
+                max_attempts,
+                side,
+                symbol,
+                quantity,
+                exc,
+            )
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=f"Exchange order failed after {max_attempts} attempts: {last_error}",
+    )
+
+
+def _to_utc_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def get_reconciliation_metrics_snapshot() -> Dict[str, Any]:
+    return deepcopy(RECONCILIATION_RUNTIME_METRICS)
+
+
+def record_reconciliation_run(
+    *,
+    result: Optional[Dict[str, Any]] = None,
+    duration_seconds: Optional[float] = None,
+    stale_summary: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None,
+) -> None:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    RECONCILIATION_RUNTIME_METRICS["total_runs"] += 1
+    RECONCILIATION_RUNTIME_METRICS["last_run_at"] = now_iso
+    RECONCILIATION_RUNTIME_METRICS["last_duration_seconds"] = duration_seconds
+
+    if error:
+        RECONCILIATION_RUNTIME_METRICS["failed_runs"] += 1
+        RECONCILIATION_RUNTIME_METRICS["consecutive_failure_runs"] += 1
+        RECONCILIATION_RUNTIME_METRICS["last_failure_at"] = now_iso
+        RECONCILIATION_RUNTIME_METRICS["last_error"] = str(error)
+        if stale_summary is not None:
+            RECONCILIATION_RUNTIME_METRICS["last_stale_summary"] = stale_summary
+        return
+
+    RECONCILIATION_RUNTIME_METRICS["successful_runs"] += 1
+    RECONCILIATION_RUNTIME_METRICS["consecutive_failure_runs"] = 0
+    RECONCILIATION_RUNTIME_METRICS["last_success_at"] = now_iso
+    RECONCILIATION_RUNTIME_METRICS["last_error"] = None
+
+    if result is None:
+        result = {}
+
+    users_checked = int(result.get("users_checked", 0))
+    users_failed = int(result.get("users_failed", 0))
+    trades_checked = int(result.get("checked", 0))
+    trades_updated = int(result.get("updated", 0))
+    trade_failures = int(result.get("failed", 0))
+
+    RECONCILIATION_RUNTIME_METRICS["total_users_checked"] += users_checked
+    RECONCILIATION_RUNTIME_METRICS["total_users_failed"] += users_failed
+    RECONCILIATION_RUNTIME_METRICS["total_trades_checked"] += trades_checked
+    RECONCILIATION_RUNTIME_METRICS["total_trades_updated"] += trades_updated
+    RECONCILIATION_RUNTIME_METRICS["total_trade_failures"] += trade_failures
+    RECONCILIATION_RUNTIME_METRICS["last_result"] = result
+    RECONCILIATION_RUNTIME_METRICS["last_stale_summary"] = stale_summary
+
+
+async def detect_stale_trade_states(
+    db,
+    *,
+    stale_seconds: int = 900,
+    max_records: int = 2000,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Scan tracked trade states and report stale lifecycle records."""
+    auto_trades_collection = db["auto_trades"]
+    query: Dict[str, Any] = {"status": {"$in": ["submitted", "close_submitted"]}}
+    if user_id:
+        query["user_id"] = user_id
+
+    tracked = await auto_trades_collection.find(query).sort("created_at", -1).to_list(length=max_records)
+    now_utc = datetime.now(timezone.utc)
+    cutoff = now_utc.timestamp() - float(stale_seconds)
+
+    stale_count = 0
+    by_status: Dict[str, int] = {"submitted": 0, "close_submitted": 0}
+    oldest_age_seconds = 0.0
+
+    for trade in tracked:
+        status_value = str(trade.get("status") or "").lower()
+        reference_time = _to_utc_datetime(trade.get("updated_at")) or _to_utc_datetime(trade.get("created_at"))
+        if not reference_time:
+            continue
+
+        age_seconds = now_utc.timestamp() - reference_time.timestamp()
+        if reference_time.timestamp() <= cutoff:
+            stale_count += 1
+            if status_value in by_status:
+                by_status[status_value] += 1
+            oldest_age_seconds = max(oldest_age_seconds, age_seconds)
+
+    return {
+        "scanned": len(tracked),
+        "stale_count": stale_count,
+        "stale_seconds_threshold": int(stale_seconds),
+        "oldest_age_seconds": int(oldest_age_seconds),
+        "by_status": by_status,
+    }
+
+
+async def reconcile_user_trade_statuses(current_user: str, db, *, max_trades: int = 100) -> Dict[str, int]:
+    """Reconcile user trades with exchange order status and update lifecycle state."""
+    from backend.binance_api import get_order_status
+
+    auto_trades_collection = db["auto_trades"]
+    tracked_statuses = ["submitted", "open", "pending", "close_submitted"]
+    tracked_trades = await auto_trades_collection.find(
+        {
+            "user_id": current_user,
+            "status": {"$in": tracked_statuses},
+        }
+    ).sort("created_at", -1).to_list(length=max_trades)
+
+    checked = 0
+    updated = 0
+    failures = 0
+
+    for trade in tracked_trades:
+        checked += 1
+        lifecycle_status = str(trade.get("status") or "").lower()
+        symbol = normalize_binance_symbol(trade.get("symbol", ""))
+        exchange_order_id = trade.get("close_order_id") if lifecycle_status == "close_submitted" else trade.get("order_id")
+        if exchange_order_id in (None, "", "N/A"):
+            continue
+
+        try:
+            parsed_order_id = int(str(exchange_order_id))
+            exchange_order = get_order_status(symbol, parsed_order_id)
+            exchange_status = str((exchange_order or {}).get("status") or "").upper()
+            if not exchange_status:
+                continue
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            set_fields = {
+                "updated_at": now_iso,
+                "last_reconciled_at": now_iso,
+            }
+            if lifecycle_status == "close_submitted":
+                set_fields["close_order_status"] = exchange_status
+                if exchange_status == "FILLED":
+                    set_fields["status"] = "closed"
+                    set_fields["closed_at"] = now_iso
+                elif exchange_status in (TERMINAL_EXCHANGE_STATUSES - {"FILLED"}):
+                    set_fields["status"] = "close_failed"
+            else:
+                set_fields["exchange_order_status"] = exchange_status
+                if exchange_status == "FILLED":
+                    set_fields["status"] = "open"
+                elif exchange_status in (TERMINAL_EXCHANGE_STATUSES - {"FILLED"}):
+                    set_fields["status"] = "failed"
+
+            await auto_trades_collection.update_one({"_id": trade.get("_id")}, {"$set": set_fields})
+            updated += 1
+        except Exception as exc:
+            failures += 1
+            logger.warning("Failed to reconcile order %s for user %s: %s", exchange_order_id, current_user, exc)
+
+    return {
+        "checked": checked,
+        "updated": updated,
+        "failed": failures,
+    }
+
+
+async def reconcile_all_active_trade_statuses(
+    db,
+    *,
+    max_users: int = 200,
+    max_trades_per_user: int = 100,
+) -> Dict[str, int]:
+    """Reconcile active trade lifecycle states across all users with active/closing trades."""
+    auto_trades_collection = db["auto_trades"]
+    tracked_statuses = list(ACTIVE_TRADE_VISIBLE_STATUSES)
+    user_ids = await auto_trades_collection.distinct(
+        "user_id",
+        {"status": {"$in": tracked_statuses}},
+    )
+
+    summary = {
+        "users_checked": 0,
+        "users_failed": 0,
+        "checked": 0,
+        "updated": 0,
+        "failed": 0,
+    }
+
+    for user_id in (user_ids or [])[:max_users]:
+        try:
+            result = await reconcile_user_trade_statuses(
+                str(user_id),
+                db,
+                max_trades=max_trades_per_user,
+            )
+            summary["users_checked"] += 1
+            summary["checked"] += int(result.get("checked", 0))
+            summary["updated"] += int(result.get("updated", 0))
+            summary["failed"] += int(result.get("failed", 0))
+        except Exception as exc:
+            summary["users_failed"] += 1
+            logger.warning("Failed to reconcile user %s active trades: %s", user_id, exc)
+
+    return summary
 
 
 async def verify_premium_subscription(current_user: str, db) -> str:
@@ -97,76 +444,83 @@ async def execute_trade_on_exchange(
         Trade execution details with order_id and status
     """
     try:
-        from backend.binance_api import get_client
-        
-        # Get Binance client
-        client = get_client()
-        
-        # Normalize symbol for Binance (remove spaces, uppercase)
-        binance_symbol = symbol.upper().replace(" ", "")
-        if not binance_symbol.endswith("USDT"):
-            binance_symbol = f"{binance_symbol}USDT"
-        
-        logger.info(f"📊 Executing {action} order on Binance.US: {binance_symbol} x{quantity}")
-        
-        # Execute the main order
-        if action.upper() == "BUY":
-            order = client.order_limit_buy(
-                symbol=binance_symbol,
-                quantity=quantity,
-                price=take_profit  # Using take_profit as target price hint (actual filled at market)
+        binance_symbol = normalize_binance_symbol(symbol)
+        normalized_action = str(action or "").upper()
+        if normalized_action not in {"BUY", "SELL"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Action must be BUY or SELL",
             )
-        elif action.upper() == "SELL":
-            order = client.order_limit_sell(
-                symbol=binance_symbol,
-                quantity=quantity,
-                price=stop_loss  # Using stop_loss as minimum price hint
-            )
-        else:
-            raise ValueError(f"Invalid action: {action}")
-        
-        order_id = order.get("orderId", "N/A")
-        
-        # Store trade in MongoDB for user tracking
-        try:
-            auto_trades_collection = db["auto_trades"]
-            trade_record = {
-                "user_id": current_user,
-                "symbol": binance_symbol,
-                "action": action.upper(),
-                "quantity": quantity,
-                "stop_loss": stop_loss,
-                "take_profit": take_profit,
-                "order_id": order_id,
-                "exchange": "binance.us",
-                "status": "submitted",
-                "created_at": datetime.utcnow(),
-                "order_details": order
-            }
-            auto_trades_collection.insert_one(trade_record)
-            logger.info(f"✅ Trade recorded in database: {order_id}")
-        except Exception as db_error:
-            logger.error(f"⚠️  Trade executed but failed to log to DB: {db_error}")
-        
+
+        current_price = get_current_market_price(binance_symbol)
+        validation_error = validate_stop_take_profit(
+            normalized_action,
+            float(stop_loss),
+            float(take_profit),
+            current_price,
+        )
+        if validation_error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=validation_error)
+
+        logger.info(
+            "Executing %s order on Binance.US: %s x%s",
+            normalized_action,
+            binance_symbol,
+            quantity,
+        )
+
+        order, attempt_count = place_market_order_with_retry(
+            symbol=binance_symbol,
+            side=normalized_action,
+            quantity=float(quantity),
+        )
+
+        order_id = str(order.get("order_id", "N/A"))
+        now = datetime.now(timezone.utc)
+        trade_record = {
+            "user_id": current_user,
+            "order_id": order_id,
+            "symbol": binance_symbol,
+            "action": normalized_action,
+            "quantity": float(quantity),
+            "stop_loss": float(stop_loss),
+            "take_profit": float(take_profit),
+            "exchange": "binance.us",
+            "status": "submitted",
+            "created_at": now,
+            "updated_at": now,
+            "submitted_price": current_price,
+            "order_attempt_count": attempt_count,
+            "order_details": order,
+        }
+
+        auto_trades_collection = db["auto_trades"]
+        await auto_trades_collection.insert_one(trade_record)
+        logger.info("Trade recorded in database: %s", order_id)
+
         return {
-            "order_id": str(order_id),
+            "order_id": order_id,
             "status": "submitted",
             "exchange": "binance.us",
             "symbol": binance_symbol,
-            "action": action.upper(),
-            "quantity": quantity,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit
+            "action": normalized_action,
+            "quantity": float(quantity),
+            "stop_loss": float(stop_loss),
+            "take_profit": float(take_profit),
+            "market_price": current_price,
+            "order_attempt_count": attempt_count,
         }
-        
+
     except ImportError:
         logger.error("Binance API module not available")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Trading infrastructure not configured"
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"❌ Trade execution failed: {e}")
+        logger.error(f"Trade execution failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Trade execution failed: {str(e)}"
@@ -261,7 +615,7 @@ def create_auto_trading_router(get_current_user_dependency, get_db_fn=get_db):
                 "symbol": symbol,
                 "signal": signal.dict(),
                 "disclaimer": "⚠️ This signal is for EDUCATIONAL PURPOSES ONLY and should NOT be used as investment advice",
-                "timestamp": signal.risk_level,
+                "timestamp": datetime.utcnow().isoformat(),
             }
         except HTTPException:
             raise
@@ -473,7 +827,7 @@ def create_auto_trading_router(get_current_user_dependency, get_db_fn=get_db):
                 "quantity": request.quantity,
                 "stop_loss": request.stop_loss,
                 "take_profit": request.take_profit,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "order_id": trade_result.get("order_id", "N/A"),
                 "exchange": trade_result.get("exchange", "binance"),
                 "message": "⚠️  Trade has been submitted. Monitor your position actively and be prepared to take manual action if needed.",
@@ -510,13 +864,15 @@ def create_auto_trading_router(get_current_user_dependency, get_db_fn=get_db):
         await verify_premium_subscription(current_user, db)
         
         try:
+            reconciliation = await reconcile_user_trade_statuses(current_user, db)
+
             # Fetch active trades from MongoDB
             auto_trades_collection = db["auto_trades"]
             
             # Find all trades for this user that are still active
             active_trades = await auto_trades_collection.find({
                 "user_id": current_user,
-                "status": {"$in": ["submitted", "open", "pending"]}
+                "status": {"$in": list(ACTIVE_TRADE_VISIBLE_STATUSES)}
             }).sort("created_at", -1).to_list(length=None)
             
             # Enrich trades with current price info
@@ -530,7 +886,7 @@ def create_auto_trading_router(get_current_user_dependency, get_db_fn=get_db):
                     "stop_loss": trade.get("stop_loss"),
                     "take_profit": trade.get("take_profit"),
                     "status": trade.get("status", "unknown"),
-                    "created_at": trade.get("created_at", datetime.utcnow()).isoformat() if hasattr(trade.get("created_at"), "isoformat") else str(trade.get("created_at")),
+                    "created_at": trade.get("created_at", datetime.now(timezone.utc)).isoformat() if hasattr(trade.get("created_at"), "isoformat") else str(trade.get("created_at")),
                     "exchange": trade.get("exchange", "binance.us")
                 }
                 
@@ -543,6 +899,7 @@ def create_auto_trading_router(get_current_user_dependency, get_db_fn=get_db):
                 "user_id": current_user,
                 "active_trades_count": len(enriched_trades),
                 "active_trades": enriched_trades,
+                "reconciliation": reconciliation,
                 "message": f"You have {len(enriched_trades)} active auto trades" if enriched_trades else "No active auto trades currently running",
                 "note": "P&L values are estimates. Check your exchange account for exact values."
             }
@@ -553,6 +910,228 @@ def create_auto_trading_router(get_current_user_dependency, get_db_fn=get_db):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error fetching active trades: {str(e)}"
+            )
+
+    @router.post("/trades/reconcile")
+    async def reconcile_active_trades(
+        current_user: str = Depends(get_current_user_dependency),
+        db = Depends(get_db_fn)
+    ):
+        """Force a reconciliation pass for active/closing trade lifecycle states."""
+        await verify_premium_subscription(current_user, db)
+
+        try:
+            result = await reconcile_user_trade_statuses(current_user, db)
+            return {
+                "status": "ok",
+                "message": "Trade statuses reconciled",
+                "result": result,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error reconciling active trades: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to reconcile trades: {str(e)}"
+            )
+
+    @router.get("/trades/reconciliation/metrics")
+    async def get_trade_reconciliation_metrics(
+        current_user: str = Depends(get_current_user_dependency),
+        db = Depends(get_db_fn)
+    ):
+        """Return reconciliation runtime metrics and user stale-state summary."""
+        await verify_premium_subscription(current_user, db)
+
+        try:
+            metrics = get_reconciliation_metrics_snapshot()
+            user_stale = await detect_stale_trade_states(
+                db,
+                stale_seconds=900,
+                max_records=500,
+                user_id=current_user,
+            )
+            return {
+                "status": "ok",
+                "metrics": metrics,
+                "user_stale_summary": user_stale,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching reconciliation metrics: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch reconciliation metrics: {str(e)}"
+            )
+
+    @router.post("/trades/{order_id}/close")
+    async def close_active_auto_trade(
+        order_id: str,
+        current_user: str = Depends(get_current_user_dependency),
+        db = Depends(get_db_fn)
+    ):
+        """Close an active auto-trade by submitting a market order in the opposite direction."""
+        await verify_premium_subscription(current_user, db)
+
+        try:
+            auto_trades_collection = db["auto_trades"]
+            existing_trade = await auto_trades_collection.find_one({
+                "user_id": current_user,
+                "order_id": str(order_id),
+            })
+
+            if not existing_trade:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active trade not found")
+
+            trade_status = str(existing_trade.get("status", "")).lower()
+            if trade_status not in ACTIVE_TRADE_STATUSES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Trade is not active (status: {trade_status or 'unknown'})"
+                )
+
+            original_action = str(existing_trade.get("action", "BUY")).upper()
+            close_action = "SELL" if original_action == "BUY" else "BUY"
+            quantity = float(existing_trade.get("quantity") or 0)
+            if quantity <= 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid trade quantity")
+
+            symbol = normalize_binance_symbol(existing_trade.get("symbol", ""))
+            close_order, attempt_count = place_market_order_with_retry(
+                symbol=symbol,
+                side=close_action,
+                quantity=quantity,
+            )
+
+            close_status = str(close_order.get("status") or "submitted").upper()
+            close_state = "closed" if close_status == "FILLED" else "close_submitted"
+            close_message = "Trade closed successfully" if close_status == "FILLED" else "Close order submitted; awaiting full fill"
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await auto_trades_collection.update_one(
+                {"_id": existing_trade.get("_id")},
+                {
+                    "$set": {
+                        "status": close_state,
+                        "closed_at": now_iso if close_state == "closed" else None,
+                        "close_reason": "manual_user_close",
+                        "close_order_id": str(close_order.get("order_id")),
+                        "close_order_status": close_status,
+                        "close_attempt_count": attempt_count,
+                        "close_order_details": close_order,
+                        "updated_at": now_iso,
+                    }
+                }
+            )
+
+            return {
+                "status": "success",
+                "message": close_message,
+                "order_id": str(order_id),
+                "close_order_id": str(close_order.get("order_id")),
+                "symbol": symbol,
+                "action": close_action,
+                "quantity": quantity,
+                "close_order_status": close_status,
+                "close_attempt_count": attempt_count,
+                "closed_at": now_iso,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error closing active trade {order_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to close trade: {str(e)}"
+            )
+
+    @router.patch("/trades/{order_id}/stops")
+    async def adjust_active_trade_stops(
+        order_id: str,
+        payload: AdjustStopsRequest,
+        current_user: str = Depends(get_current_user_dependency),
+        db = Depends(get_db_fn)
+    ):
+        """Adjust stop-loss and take-profit values for an active tracked trade."""
+        await verify_premium_subscription(current_user, db)
+
+        try:
+            stop_loss = float(payload.stop_loss)
+            take_profit = float(payload.take_profit)
+            if stop_loss <= 0 or take_profit <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="stop_loss and take_profit must be greater than 0"
+                )
+
+            auto_trades_collection = db["auto_trades"]
+            existing_trade = await auto_trades_collection.find_one({
+                "user_id": current_user,
+                "order_id": str(order_id),
+            })
+
+            if not existing_trade:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active trade not found")
+
+            trade_status = str(existing_trade.get("status", "")).lower()
+            if trade_status not in ACTIVE_TRADE_STATUSES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Trade is not active (status: {trade_status or 'unknown'})"
+                )
+
+            action = str(existing_trade.get("action", "BUY")).upper()
+            symbol = normalize_binance_symbol(existing_trade.get("symbol", ""))
+            current_price = get_current_market_price(symbol)
+            validation_error = validate_stop_take_profit(
+                action,
+                stop_loss,
+                take_profit,
+                current_price,
+            )
+            if validation_error:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=validation_error)
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            await auto_trades_collection.update_one(
+                {"_id": existing_trade.get("_id")},
+                {
+                    "$set": {
+                        "stop_loss": stop_loss,
+                        "take_profit": take_profit,
+                        "updated_at": now_iso,
+                    },
+                    "$push": {
+                        "adjustments": {
+                            "timestamp": now_iso,
+                            "type": "stops",
+                            "stop_loss": stop_loss,
+                            "take_profit": take_profit,
+                        }
+                    }
+                }
+            )
+
+            return {
+                "status": "success",
+                "message": "Trade stops updated",
+                "order_id": str(order_id),
+                "symbol": symbol,
+                "action": action,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "market_price": current_price,
+                "updated_at": now_iso,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error adjusting stops for trade {order_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to adjust stops: {str(e)}"
             )
     
     @router.post("/generate-signal/{symbol}")

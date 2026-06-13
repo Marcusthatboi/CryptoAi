@@ -1,0 +1,11 @@
+[Unit]
+Description=Run CryptoAI API Origin Auto-Heal Every Minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=cryptoai-api-autoheal.service
+
+[Install]
+WantedBy=timers.target

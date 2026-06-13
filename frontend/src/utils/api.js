@@ -1,6 +1,6 @@
 import axios from 'axios'
+import { API_BASE } from './backendConfig'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
 const RETRYABLE_METHODS = new Set(['get', 'head', 'options'])
 const DEFAULT_MAX_RETRY_ATTEMPTS = 2
 const RETRY_BASE_DELAY_MS = 400
@@ -119,6 +119,10 @@ export const cryptoAPI = {
   // Alert endpoints
   getAlerts: (threshold = 5.0) => 
     api.get('/api/alerts', { params: { threshold }, retryAttempts: 0, timeout: 20000 }),
+  getAlertAutoBuyConfig: () =>
+    api.get('/api/alerts/auto-buy', { timeout: 15000 }),
+  updateAlertAutoBuyConfig: (payload) =>
+    api.post('/api/alerts/auto-buy', payload, { timeout: 15000 }),
   
   // History endpoints
   getHistory: (cryptoId, limit = 50) => 
@@ -132,11 +136,14 @@ export const cryptoAPI = {
   
   // Config endpoints
   getConfig: () => api.get('/api/config'),
+  getLiveReadiness: () => api.get('/api/system/live-readiness', { timeout: 12000, retryAttempts: 0 }),
   getAssets: (limit = 250) => api.get('/api/assets', { params: { limit } }),
   
   // Chat endpoint
   sendChat: (message, context = 'crypto') => 
     api.post('/api/chat', { message, context }),
+  fixGrammar: (text) =>
+    api.post('/api/text/grammar', { text }, { timeout: 30000 }),
   
   // Recommendations endpoint
   getRecommendations: (count = 5, filters = {}) => 
@@ -157,6 +164,12 @@ export const cryptoAPI = {
   // Subscription usage summary endpoint
   getSubscriptionStatus: () => api.get('/api/subscription/status'),
   getSubscriptionUsageSummary: () => api.get('/api/subscription/usage-summary'),
+  getAdCampaigns: () => api.get('/api/ads/campaigns', { timeout: 15000 }),
+  getAdPlacements: (placement = 'home', limit = 2) =>
+    api.get(`/api/ads/placements/${placement}`, { params: { limit }, timeout: 15000 }),
+  createAdCampaign: (payload) => api.post('/api/ads/campaigns', payload, { timeout: 20000 }),
+  createAdCheckoutSession: (campaignId, payload) =>
+    api.post(`/api/ads/campaigns/${campaignId}/stripe-checkout-session`, payload, { timeout: 20000 }),
   
   // User Portfolio endpoints
   getUserPortfolio: (options = {}) =>

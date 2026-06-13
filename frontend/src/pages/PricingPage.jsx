@@ -5,10 +5,13 @@ import axios from 'axios'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { loadStripe } from '@stripe/stripe-js'
 import { QRCodeSVG } from 'qrcode.react'
+import { API_BASE } from '../utils/backendConfig'
 import './PricingPage.css'
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '')
 const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL || 'cryptosupport74@gmail.com'
+
+const SUBSCRIPTION_PRICES = { pro: 999, premium: 2999 }
 
 function CheckoutModal({
   visible,
@@ -131,7 +134,6 @@ function CheckoutModal({
 export default function PricingPage() {
   const { token, user } = useAuth()
   const navigate = useNavigate()
-  const API_BASE = `http://${window.location.hostname || 'localhost'}:8002`
   const [plans, setPlans] = useState([])
   const [currentTier, setCurrentTier] = useState('free')
   const [loading, setLoading] = useState(true)
@@ -143,13 +145,108 @@ export default function PricingPage() {
   const [stripeCustomerId, setStripeCustomerId] = useState('')
   const [showCheckoutModal, setShowCheckoutModal] = useState(false)
   const [applePayCheckoutUrl, setApplePayCheckoutUrl] = useState('')
+  const [redirectingTier, setRedirectingTier] = useState(null)
+  const [manualCheckoutUrl, setManualCheckoutUrl] = useState('')
+  const [liveReadiness, setLiveReadiness] = useState({
+    stripe: { ready: null, live_mode: false, message: 'Checking checkout readiness...' }
+  })
+  const [promoStatus, setPromoStatus] = useState(null)
+  const [applyPromo, setApplyPromo] = useState(false)
+  const [emailVerified, setEmailVerified] = useState(null)
+  const [sendingVerification, setSendingVerification] = useState(false)
+  const normalizedCurrentTier = String(currentTier || 'free').toLowerCase()
+  const isProcessingCheckout = processingTier !== null
+
+  const getPlanByTier = (tier, fallback) => {
+    const matched = plans.find((plan) => String(plan?.tier || '').toLowerCase() === tier)
+    if (!matched) {
+      return fallback
+    }
+
+    return {
+      ...fallback,
+      ...matched,
+      priceDisplay: matched.price_display || fallback.priceDisplay,
+      features: Array.isArray(matched.features) && matched.features.length ? matched.features : fallback.features
+    }
+  }
+
+  const proPlan = getPlanByTier('pro', {
+    name: 'Pro',
+    priceDisplay: '$9.99/mo',
+    features: [
+      'Everything in Free +',
+      'Advanced AI signals',
+      'Real-time price alerts',
+      'Signal confidence scoring',
+      'Signal history (30 days)',
+      'Portfolio optimization tips'
+    ]
+  })
+
+  const premiumPlan = getPlanByTier('premium', {
+    name: 'Premium',
+    priceDisplay: '$29.99/mo',
+    features: [
+      'Everything in Pro +',
+      'Exclusive high-accuracy signals',
+      'Unlimited alerts',
+      'Signal history (1 year)',
+      'Advanced portfolio analytics',
+      'Early access to new features',
+      'Priority support',
+      'Performance tracking'
+    ]
+  })
+
+  const shouldUseMobileHostedCheckout = () => {
+    if (typeof window === 'undefined') return false
+    const compactViewport = window.matchMedia && window.matchMedia('(max-width: 768px)').matches
+    const touchDevice = typeof navigator !== 'undefined' && (
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '') ||
+      (navigator.maxTouchPoints || 0) > 1
+    )
+    return compactViewport || touchDevice
+  }
 
   useEffect(() => {
     fetchPlans()
+    fetchLiveReadiness()
     if (user?.user_id) {
       fetchUserSubscription()
     }
   }, [user])
+
+  useEffect(() => {
+    fetchPromoStatus()
+  }, [])
+
+  useEffect(() => {
+    if (token) fetchVerificationStatus()
+  }, [token])
+
+  const fetchLiveReadiness = async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/api/system/live-readiness`)
+      const stripe = response?.data?.stripe || {}
+      setLiveReadiness({
+        stripe: {
+          ready: Boolean(stripe.ready),
+          live_mode: Boolean(stripe.live_mode),
+          message: String(stripe.message || 'Stripe readiness unavailable')
+        }
+      })
+    } catch (err) {
+      setLiveReadiness({
+        stripe: {
+          ready: false,
+          live_mode: false,
+          message: 'Unable to verify checkout readiness. Backend may be unavailable.'
+        }
+      })
+      console.error('Failed to fetch live readiness:', err)
+    }
+  }
 
   const fetchPlans = async () => {
     try {
@@ -174,9 +271,45 @@ export default function PricingPage() {
     }
   }
 
+  const fetchPromoStatus = async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/api/promo/status`)
+      setPromoStatus(response.data)
+    } catch (err) {
+      setPromoStatus(null)
+    }
+  }
+
+  const fetchVerificationStatus = async () => {
+    try {
+      const r = await axios.get(`${API_BASE}/api/auth/verification-status`, { headers: { Authorization: `Bearer ${token}` } })
+      setEmailVerified(r.data.email_verified)
+    } catch { setEmailVerified(null) }
+  }
+
+  const handleSendVerificationEmail = async () => {
+    setSendingVerification(true)
+    try {
+      const r = await axios.post(`${API_BASE}/api/auth/send-verification-email`, {}, { headers: { Authorization: `Bearer ${token}` } })
+      setCheckoutMessage({ type: 'success', text: r.data?.message || 'Verification email sent. Check your inbox.' })
+    } catch (err) {
+      setCheckoutMessage({ type: 'error', text: err.response?.data?.detail || 'Failed to send verification email.' })
+    } finally {
+      setSendingVerification(false)
+    }
+  }
+
   const handleUpgrade = async (tier) => {
     if (!token) {
       navigate('/login')
+      return
+    }
+
+    if (!liveReadiness?.stripe?.ready) {
+      setCheckoutMessage({
+        type: 'error',
+        text: `${liveReadiness?.stripe?.message || 'Stripe checkout is unavailable.'} Please configure Stripe keys and try again.`
+      })
       return
     }
 
@@ -188,7 +321,7 @@ export default function PricingPage() {
         `${API_BASE}/api/subscription/create-payment-intent`,
         null,
         {
-          params: { tier },
+          params: { tier, apply_promo: applyPromo },
           headers: { Authorization: `Bearer ${token}` }
         }
       )
@@ -196,8 +329,12 @@ export default function PricingPage() {
       setSelectedPlan(tier)
       setClientSecret(response.data?.client_secret || '')
       setStripeCustomerId(response.data?.stripe_customer_id || '')
-      const amountUsd = ((response.data?.amount || 0) / 100).toFixed(2)
+      const amountUsd = ((response.data?.promo_applied ? response.data.promo_discounted_cents : response.data?.amount || 0) / 100).toFixed(2)
       setCheckoutAmount(amountUsd)
+      if (response.data?.promo_applied) {
+        setCheckoutMessage({ type: 'success', text: `🎉 Launch deal applied! ${response.data.promo_discount_pct}% off — you pay $${amountUsd} today.` })
+        fetchPromoStatus()
+      }
 
       try {
         const checkoutSessionResponse = await axios.post(
@@ -208,7 +345,23 @@ export default function PricingPage() {
             headers: { Authorization: `Bearer ${token}` }
           }
         )
-        setApplePayCheckoutUrl(checkoutSessionResponse.data?.url || '')
+        const hostedCheckoutUrl = checkoutSessionResponse.data?.url || ''
+        setApplePayCheckoutUrl(hostedCheckoutUrl)
+
+        if (hostedCheckoutUrl && shouldUseMobileHostedCheckout()) {
+          setRedirectingTier(tier)
+          setManualCheckoutUrl('')
+          window.location.assign(hostedCheckoutUrl)
+          window.setTimeout(() => {
+            setRedirectingTier(null)
+            setManualCheckoutUrl(hostedCheckoutUrl)
+            setCheckoutMessage({
+              type: 'error',
+              text: 'Checkout did not open automatically. Use the manual checkout button below.'
+            })
+          }, 1500)
+          return
+        }
       } catch (checkoutSessionError) {
         console.error('Failed to create Apple Pay checkout session:', checkoutSessionError)
         setApplePayCheckoutUrl('')
@@ -224,6 +377,7 @@ export default function PricingPage() {
       setCheckoutMessage({ type: 'error', text: detail })
       console.error('Failed to initialize checkout:', err)
     } finally {
+      setRedirectingTier(null)
       setProcessingTier(null)
     }
   }
@@ -231,6 +385,10 @@ export default function PricingPage() {
   const closeCheckoutModal = () => {
     setShowCheckoutModal(false)
     setApplePayCheckoutUrl('')
+  }
+
+  const clearManualCheckoutPrompt = () => {
+    setManualCheckoutUrl('')
   }
 
   const onPaymentError = (message) => {
@@ -274,6 +432,61 @@ export default function PricingPage() {
     }
   }
 
+  const handleDowngradeToPro = async () => {
+    if (!token || normalizedCurrentTier !== 'premium') {
+      return
+    }
+
+    try {
+      setProcessingTier('pro')
+      const response = await axios.post(
+        `${API_BASE}/api/subscription/downgrade`,
+        null,
+        {
+          params: { tier: 'pro' },
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      )
+
+      setCheckoutMessage({
+        type: 'success',
+        text: response?.data?.message || 'Downgrade to Pro scheduled for your next billing cycle.'
+      })
+      await fetchUserSubscription()
+    } catch (err) {
+      const detail = err?.response?.data?.detail || 'Failed to schedule downgrade.'
+      setCheckoutMessage({ type: 'error', text: detail })
+    } finally {
+      setProcessingTier(null)
+    }
+  }
+
+  const handleCancelToFree = async () => {
+    if (!token || normalizedCurrentTier === 'free') {
+      return
+    }
+
+    try {
+      setProcessingTier('free')
+      const response = await axios.post(
+        `${API_BASE}/api/subscription/cancel`,
+        null,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+
+      setCheckoutMessage({
+        type: 'success',
+        text: response?.data?.message || 'Subscription cancelled successfully.'
+      })
+      await fetchUserSubscription()
+    } catch (err) {
+      const detail = err?.response?.data?.detail || 'Failed to cancel subscription.'
+      setCheckoutMessage({ type: 'error', text: detail })
+    } finally {
+      setProcessingTier(null)
+    }
+  }
+
   if (loading) {
     return (
       <div className="pricing-page">
@@ -289,6 +502,40 @@ export default function PricingPage() {
         <p>Unlock advanced AI signals and profit-tracking features</p>
       </div>
 
+      {/* Launch sale banner */}
+      {promoStatus?.active && (
+        <div className="launch-promo-banner" role="alert">
+          <div className="promo-banner-content">
+            <span className="promo-fire">🔥</span>
+            <div className="promo-text">
+              <strong>LAUNCH DEAL — {promoStatus.discount_pct}% OFF</strong>
+              <span> · First-100 users only · {promoStatus.claims_remaining} spot{promoStatus.claims_remaining !== 1 ? 's' : ''} left out of {promoStatus.total_slots}</span>
+            </div>
+          </div>
+          <label className="promo-toggle-label">
+            <input
+              type="checkbox"
+              checked={applyPromo}
+              onChange={e => setApplyPromo(e.target.checked)}
+              className="promo-toggle-input"
+            />
+            <span className="promo-toggle-text">Apply {promoStatus.discount_pct}% discount to my upgrade</span>
+          </label>
+        </div>
+      )}
+      {promoStatus && !promoStatus.active && (
+        <div className="launch-promo-banner promo-ended" role="status">
+          🏁 Launch deal ended — all 100 discounted spots claimed. Regular pricing applies.
+        </div>
+      )}
+
+      <div className={`checkout-readiness-banner ${liveReadiness?.stripe?.ready ? 'ready' : 'blocked'}`}>
+        <strong>Checkout status:</strong> {liveReadiness?.stripe?.message}
+        {liveReadiness?.stripe?.ready && !liveReadiness?.stripe?.live_mode && (
+          <span className="checkout-readiness-note"> • Test mode</span>
+        )}
+      </div>
+
       {!import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY && (
         <div className="checkout-message error">
           Stripe publishable key is missing. Set VITE_STRIPE_PUBLISHABLE_KEY in frontend/.env.local.
@@ -302,12 +549,39 @@ export default function PricingPage() {
         </div>
       )}
 
+      {/* Email verification nudge */}
+      {token && emailVerified === false && (
+        <div className="verify-email-notice">
+          <span>⚠️ Your email is not verified. Verify to protect your account and unlock promo eligibility.</span>
+          <button className="verify-email-btn" onClick={handleSendVerificationEmail} disabled={sendingVerification}>
+            {sendingVerification ? 'Sending...' : 'Verify Email'}
+          </button>
+        </div>
+      )}
+      {token && emailVerified === true && (
+        <div className="verify-email-notice" style={{ borderColor: '#4ade80', color: '#4ade80', background: 'rgba(74,222,128,0.08)' }}>
+          ✅ Email verified
+        </div>
+      )}
+
       {checkoutMessage && (
         <div className={`checkout-message ${checkoutMessage.type}`}>
           {checkoutMessage.text}
           {selectedPlan && checkoutMessage.type === 'success' && (
             <div className="checkout-note">Selected plan: {selectedPlan.toUpperCase()}</div>
           )}
+        </div>
+      )}
+
+      {manualCheckoutUrl && (
+        <div className="manual-checkout-toast" role="status" aria-live="polite">
+          <span>Checkout did not open automatically.</span>
+          <a href={manualCheckoutUrl} className="manual-checkout-link" target="_blank" rel="noreferrer">
+            Open checkout manually
+          </a>
+          <button type="button" className="manual-checkout-dismiss" onClick={clearManualCheckoutPrompt}>
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -328,10 +602,15 @@ export default function PricingPage() {
           </div>
 
           <button
-            className={`action-btn ${currentTier === 'free' ? 'current-plan' : ''}`}
-            disabled={currentTier === 'free' || processingTier !== null}
+            className={`action-btn ${normalizedCurrentTier === 'free' ? 'current-plan' : ''}`}
+            onClick={handleCancelToFree}
+            disabled={isProcessingCheckout || processingTier === 'free' || normalizedCurrentTier === 'free'}
           >
-            {currentTier === 'free' ? '✓ Current Plan' : 'Downgrade'}
+            {processingTier === 'free'
+              ? 'Processing...'
+              : normalizedCurrentTier === 'free'
+                ? '✓ Current Plan'
+                : 'Cancel to Free'}
           </button>
         </div>
 
@@ -340,26 +619,47 @@ export default function PricingPage() {
           <div className="popular-badge">Most Popular</div>
           <div className="card-header">
             <h2>Pro</h2>
-            <p className="price">$9.99<span>/month</span></p>
+            {applyPromo && promoStatus?.active ? (
+              <p className="price">
+                <span className="price-original">{proPlan.priceDisplay.replace('/mo', '')}</span>
+                <span className="price-discounted"> ${(SUBSCRIPTION_PRICES.pro * (1 - promoStatus.discount_pct / 100) / 100).toFixed(2)}</span>
+                <span>/month</span>
+              </p>
+            ) : (
+              <p className="price">{proPlan.priceDisplay.replace('/mo', '')}<span>/month</span></p>
+            )}
           </div>
 
           <div className="features-list">
-            <div className="feature">✓ Everything in Free +</div>
-            <div className="feature">✓ Advanced AI signals</div>
-            <div className="feature">✓ Real-time price alerts</div>
-            <div className="feature">✓ Signal confidence scoring</div>
-            <div className="feature">✓ Signal history (30 days)</div>
-            <div className="feature">✓ Portfolio optimization tips</div>
+            {proPlan.features.map((feature) => (
+              <div key={`pro-${feature}`} className="feature">✓ {feature}</div>
+            ))}
             <div className="feature limit">⚡ 100 signals/day</div>
             <div className="feature limit">⚡ 20 alerts/day</div>
           </div>
 
           <button
-            className={`action-btn upgrade-btn ${currentTier === 'pro' ? 'current-plan' : ''}`}
-            onClick={() => handleUpgrade('pro')}
-            disabled={currentTier === 'pro' || processingTier !== null}
+            className={`action-btn upgrade-btn ${normalizedCurrentTier === 'pro' ? 'current-plan' : ''}`}
+            onClick={() => {
+              if (normalizedCurrentTier === 'premium') {
+                handleDowngradeToPro()
+                return
+              }
+              if (normalizedCurrentTier !== 'pro') {
+                handleUpgrade('pro')
+              }
+            }}
+            disabled={isProcessingCheckout}
           >
-            {processingTier === 'pro' ? 'Creating checkout...' : currentTier === 'pro' ? '✓ Current Plan' : 'Upgrade to Pro'}
+            {redirectingTier === 'pro'
+              ? 'Opening checkout...'
+              : processingTier === 'pro'
+              ? normalizedCurrentTier === 'premium' ? 'Scheduling downgrade...' : 'Creating checkout...'
+              : normalizedCurrentTier === 'pro'
+                ? '✓ Current Plan'
+                : normalizedCurrentTier === 'premium'
+                  ? 'Schedule Downgrade to Pro'
+                  : 'Upgrade to Pro'}
           </button>
         </div>
 
@@ -368,27 +668,36 @@ export default function PricingPage() {
           <div className="elite-badge">Elite</div>
           <div className="card-header">
             <h2>Premium</h2>
-            <p className="price">$29.99<span>/month</span></p>
+            {applyPromo && promoStatus?.active ? (
+              <p className="price">
+                <span className="price-original">{premiumPlan.priceDisplay.replace('/mo', '')}</span>
+                <span className="price-discounted"> ${(SUBSCRIPTION_PRICES.premium * (1 - promoStatus.discount_pct / 100) / 100).toFixed(2)}</span>
+                <span>/month</span>
+              </p>
+            ) : (
+              <p className="price">{premiumPlan.priceDisplay.replace('/mo', '')}<span>/month</span></p>
+            )}
           </div>
 
           <div className="features-list">
-            <div className="feature">✓ Everything in Pro +</div>
-            <div className="feature">✓ Exclusive high-accuracy signals</div>
-            <div className="feature">✓ Unlimited alerts</div>
-            <div className="feature">✓ Signal history (1 year)</div>
-            <div className="feature">✓ Advanced portfolio analytics</div>
-            <div className="feature">✓ Early access to new features</div>
-            <div className="feature">✓ Priority support</div>
-            <div className="feature">✓ Performance tracking</div>
+            {premiumPlan.features.map((feature) => (
+              <div key={`premium-${feature}`} className="feature">✓ {feature}</div>
+            ))}
             <div className="feature limit">⚡ Unlimited signals</div>
           </div>
 
           <button
-            className={`action-btn premium-btn ${currentTier === 'premium' ? 'current-plan' : ''}`}
+            className={`action-btn premium-btn ${normalizedCurrentTier === 'premium' ? 'current-plan' : ''}`}
             onClick={() => handleUpgrade('premium')}
-            disabled={currentTier === 'premium' || processingTier !== null}
+            disabled={isProcessingCheckout || normalizedCurrentTier === 'premium'}
           >
-            {processingTier === 'premium' ? 'Creating checkout...' : currentTier === 'premium' ? '✓ Current Plan' : 'Upgrade to Premium'}
+            {redirectingTier === 'premium'
+              ? 'Opening checkout...'
+              : processingTier === 'premium'
+              ? 'Creating checkout...'
+              : normalizedCurrentTier === 'premium'
+                ? '✓ Current Plan'
+                : 'Upgrade to Premium'}
           </button>
         </div>
       </div>

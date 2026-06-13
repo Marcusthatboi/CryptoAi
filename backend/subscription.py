@@ -494,7 +494,6 @@ async def create_checkout_session(
         session = stripe.checkout.Session.create(
             mode="payment",
             customer=customer_id,
-            customer_email=email,
             success_url=success_url,
             cancel_url=cancel_url,
             payment_method_types=["card"],

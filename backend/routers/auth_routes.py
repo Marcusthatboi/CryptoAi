@@ -21,6 +21,8 @@ from backend.auth import (
     reset_user_password_with_token,
     decrypt_account_settings,
     update_user_account_settings,
+    verify_password,
+    should_force_password_change,
 )
 from backend.db import get_db
 from backend.support_email import send_support_email, send_email
@@ -47,14 +49,15 @@ def create_auth_router(
             db = await get_db_fn()
             user_doc = await create_user_fn(db, user_data.username, user_data.password, user_data.email)
             user_id = str(user_doc["_id"])
+            canonical_username = str(user_doc.get("username") or user_data.username)
 
-            token_data = {"sub": user_data.username, "user_id": user_id}
+            token_data = {"sub": canonical_username, "user_id": user_id}
             access_token = create_access_token(token_data)
 
             return TokenResponse(
                 access_token=access_token,
                 token_type="bearer",
-                username=user_data.username,
+                username=canonical_username,
                 user_id=user_id,
                 is_admin=user_is_admin_fn(user_doc),
                 role=user_doc.get("role") or ("admin" if user_is_admin_fn(user_doc) else "user"),
@@ -73,7 +76,15 @@ def create_auth_router(
     async def login_user(user_data: UserLogin):
         try:
             db = await get_db_fn()
-            user = await authenticate_user_fn(db, user_data.username, user_data.password)
+            login_identifier = str(user_data.username or "").strip()
+            user = await authenticate_user_fn(db, login_identifier, user_data.password)
+
+            # Backward-compatible fallback: if caller entered email in the username field,
+            # authenticate against email and password.
+            if not user and "@" in login_identifier:
+                email_user = await get_user_by_email_fn(db, login_identifier)
+                if email_user:
+                    user = await authenticate_user_fn(db, email_user.get("username", ""), user_data.password)
 
             if not user:
                 raise HTTPException(
@@ -82,19 +93,22 @@ def create_auth_router(
                 )
 
             user_id = str(user["_id"])
-            token_data = {"sub": user_data.username, "user_id": user_id}
+            canonical_username = str(user.get("username") or user_data.username)
+            token_data = {"sub": canonical_username, "user_id": user_id}
             access_token = create_access_token(token_data)
 
-            logger.info(f"✅ User logged in: {user_data.username}")
+            logger.info(f"✅ User logged in: {canonical_username}")
 
             return TokenResponse(
                 access_token=access_token,
                 token_type="bearer",
-                username=user_data.username,
+                username=canonical_username,
                 user_id=user_id,
                 is_admin=user_is_admin_fn(user),
                 role=user.get("role") or ("admin" if user_is_admin_fn(user) else "user"),
                 expires_in=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440")) * 60,
+                password_change_required=should_force_password_change(user),
+                password_change_reason="Admin password rotation required" if should_force_password_change(user) else None,
             )
         except HTTPException:
             raise

@@ -10,7 +10,7 @@ TEST_SYMBOL = "BTCUSDT"
 
 def _ensure_backend_available() -> None:
     try:
-        response = requests.get(f"{API_BASE}/docs", timeout=5)
+        response = requests.get(f"{API_BASE}/health", timeout=5)
         response.raise_for_status()
     except requests.RequestException as exc:
         pytest.skip(f"Backend not reachable at {API_BASE}: {exc}")

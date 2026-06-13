@@ -471,8 +471,7 @@
   }
 
   .invest-sidebar {
-    position: sticky;
-    bottom: 0;
+    position: static;
   }
 
   .sell-inline-controls {

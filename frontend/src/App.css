@@ -153,6 +153,33 @@ body {
 }
 
 
+/* 3-column dashboard layout */
+.dashboard-layout-outer {
+  flex: 1;
+  width: 100%;
+  background: #f8f9fa;
+}
+
+.dashboard-layout {
+  display: grid;
+  grid-template-columns: 190px 1fr 260px;
+  gap: 0;
+  max-width: 1600px;
+  margin: 0 auto;
+  align-items: start;
+  padding: 20px 12px;
+}
+
+.dashboard-sidebar-left {
+  padding: 0 12px 20px 0;
+  min-width: 0;
+}
+
+.dashboard-sidebar-right {
+  padding: 0 0 20px 12px;
+  min-width: 0;
+}
+
 /* Main Content */
 .main-content {
   flex: 1;
@@ -160,6 +187,13 @@ body {
   margin: 0 auto;
   width: 100%;
   padding: 20px;
+}
+
+.main-content.dashboard-main-col {
+  max-width: 100%;
+  margin: 0;
+  padding: 0 8px;
+  min-width: 0;
 }
 
 .upgrade-success-banner {
@@ -423,6 +457,13 @@ body {
   opacity: 0.8;
 }
 
+.build-stamp {
+  margin-top: 8px !important;
+  font-size: 12px !important;
+  opacity: 0.65 !important;
+  letter-spacing: 0.02em;
+}
+
 .support-footer-btn {
   border: none;
   background: transparent;
@@ -441,12 +482,25 @@ body {
 /* Responsive */
 @media (max-width: 768px) {
   .global-language-switcher {
-    top: auto;
-    right: 10px;
-    bottom: 10px;
-    left: 10px;
-    display: flex;
-    justify-content: center;
+    top: 8px;
+    right: 8px;
+    left: auto;
+    bottom: auto;
+    max-width: calc(100vw - 16px);
+    display: block;
+    padding: 4px 6px;
+    z-index: 1100;
+  }
+
+  /* Collapse sidebars on tablet/mobile */
+  .dashboard-layout {
+    grid-template-columns: 1fr;
+    padding: 10px 8px;
+  }
+
+  .dashboard-sidebar-left,
+  .dashboard-sidebar-right {
+    display: none;
   }
 
   .header {
@@ -490,6 +544,11 @@ body {
   }
 
   .price-cards-container {
+    display: grid;
+    grid-template-columns: 1fr;
+    overflow: visible;
+    margin: 0;
+    padding: 0;
     gap: 12px;
   }
 
@@ -535,7 +594,10 @@ body {
   }
 
   .card-wrapper {
-    min-width: min(84vw, 320px);
+    min-width: 0;
+    width: 100%;
+    flex-shrink: 1;
+    scroll-snap-align: none;
   }
 
   .footer {

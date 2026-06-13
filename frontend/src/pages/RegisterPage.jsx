@@ -4,6 +4,8 @@ import { useAuth } from '../hooks/useAuth'
 import { useLanguage } from '../context/LanguageContext'
 import BrandMark from '../components/BrandMark'
 import './LoginPage.css'
+import axios from 'axios'
+import { API_BASE } from '../utils/backendConfig'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
@@ -18,6 +20,9 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [showVerifyNudge, setShowVerifyNudge] = useState(false)
+  const [sendingVerify, setSendingVerify] = useState(false)
+  const [verifyMessage, setVerifyMessage] = useState('')
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -66,12 +71,29 @@ export default function RegisterPage() {
       await register(formData.username, formData.password, formData.email)
 
       setSuccess('✅ Registration successful! Redirecting...')
-      setTimeout(() => {
-        navigate('/dashboard')
-      }, 1500)
+      if (formData.email) {
+        setShowVerifyNudge(true)
+      } else {
+        setTimeout(() => navigate('/dashboard'), 1500)
+      }
     } catch (err) {
       setError(err.message || 'Registration failed')
       setLoading(false)
+    }
+  }
+
+  const handleSendVerify = async () => {
+    setSendingVerify(true)
+    try {
+      const token = localStorage.getItem('token')
+      const r = await axios.post(`${API_BASE}/api/auth/send-verification-email`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      setVerifyMessage(r.data?.message || 'Verification email sent. Check your inbox.')
+    } catch (err) {
+      setVerifyMessage(err.response?.data?.detail || 'Failed to send verification email.')
+    } finally {
+      setSendingVerify(false)
     }
   }
 
@@ -98,6 +120,24 @@ export default function RegisterPage() {
           {success && (
             <div className="success-message">
               {success}
+            </div>
+          )}
+
+          {showVerifyNudge && (
+            <div className="success-message" style={{ background: '#1d4ed8', padding: '16px', borderRadius: '8px', marginTop: '8px' }}>
+              <p style={{ margin: '0 0 8px', fontWeight: 600 }}>🎉 Welcome! Would you like to verify your email now?</p>
+              <p style={{ margin: '0 0 10px', fontSize: '0.9em', opacity: 0.9 }}>Verification is required for the launch promo and helps protect your account.</p>
+              {verifyMessage && <p style={{ margin: '0 0 8px', fontSize: '0.85em' }}>{verifyMessage}</p>}
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <button type="button" onClick={handleSendVerify} disabled={sendingVerify}
+                  style={{ background: 'white', color: '#1d4ed8', border: 'none', borderRadius: '6px', padding: '8px 16px', fontWeight: 600, cursor: 'pointer' }}>
+                  {sendingVerify ? 'Sending...' : 'Send Verification Email'}
+                </button>
+                <button type="button" onClick={() => navigate('/dashboard')}
+                  style={{ background: 'rgba(255,255,255,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.4)', borderRadius: '6px', padding: '8px 16px', cursor: 'pointer' }}>
+                  Skip for now
+                </button>
+              </div>
             </div>
           )}
 

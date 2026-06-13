@@ -6,6 +6,7 @@
   max-width: 500px;
   margin: 24px auto;
   border: 1px solid rgba(0, 0, 0, 0.02);
+  box-sizing: border-box;
 }
 
 .form-header {
@@ -191,10 +192,13 @@
   justify-content: space-between;
   padding: 8px 0;
   font-size: 14px;
+  gap: 12px;
 }
 
 .summary-row strong {
   font-weight: 600;
+  text-align: right;
+  word-break: break-word;
 }
 
 .payment-warnings {
@@ -335,4 +339,34 @@
   text-align: center;
   margin-top: 12px;
   line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+  .payment-form {
+    padding: 18px 14px;
+    margin: 12px auto;
+    border-radius: 12px;
+  }
+
+  .form-header h3 {
+    font-size: 19px;
+  }
+
+  .summary-row {
+    align-items: flex-start;
+  }
+
+  .summary-row span:first-child,
+  .summary-row strong {
+    font-size: 13px;
+  }
+
+  .payment-submit-btn {
+    min-height: 48px;
+    font-size: 15px;
+  }
+
+  .purchase-confirm-actions {
+    flex-direction: column;
+  }
 }

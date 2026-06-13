@@ -59,6 +59,8 @@ COLLECTIONS = {
     "orders": "orders",           # Trade orders
     "portfolio": "portfolio",     # Portfolio snapshots
     "alerts": "alerts",           # Price alerts
+    "ad_campaigns": "ad_campaigns", # Sponsored ad campaigns
+    "ad_events": "ad_events",     # Ad impressions and clicks
     "trades": "trades",           # Executed trades
     "settings": "settings",       # User settings
     "users": "users",             # User accounts with authentication
@@ -89,6 +91,16 @@ async def init_collections():
         alerts_col = database[COLLECTIONS["alerts"]]
         await alerts_col.create_index([("account_id", 1), ("symbol", 1)])
         logger.info("✅ Created alerts collection with indexes")
+
+        ad_campaigns_col = database[COLLECTIONS["ad_campaigns"]]
+        await ad_campaigns_col.create_index([("placement", 1), ("status", 1), ("remaining_budget_cents", -1)])
+        await ad_campaigns_col.create_index([("created_at", -1)])
+        logger.info("✅ Created ad_campaigns collection with indexes")
+
+        ad_events_col = database[COLLECTIONS["ad_events"]]
+        await ad_events_col.create_index([("campaign_id", 1), ("event_type", 1), ("created_at", -1)])
+        await ad_events_col.create_index([("campaign_id", 1), ("created_at", -1)])
+        logger.info("✅ Created ad_events collection with indexes")
         
         # Users collection with unique username index
         users_col = database[COLLECTIONS["users"]]

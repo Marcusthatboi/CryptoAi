@@ -2,9 +2,10 @@
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 12px;
   padding: 24px;
-  margin: 16px;
+  margin: 0;
   color: white;
-  min-width: 280px;
+  min-width: 0;
+  width: 100%;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
@@ -30,7 +31,8 @@
 .card-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 10px;
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.2);
@@ -40,11 +42,13 @@
   margin: 0;
   font-size: 24px;
   font-weight: bold;
+  word-break: break-word;
 }
 
 .card-header-right {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -113,6 +117,7 @@
   font-size: 40px;
   font-weight: bold;
   letter-spacing: -1px;
+  word-break: break-word;
 }
 
 .details {
@@ -138,5 +143,33 @@
 .card-footer small {
   opacity: 0.8;
   font-size: 12px;
-  white-space: nowrap;
+  white-space: normal;
+}
+
+@media (max-width: 768px) {
+  .price-card {
+    padding: 16px;
+    border-radius: 10px;
+  }
+
+  .card-header h3 {
+    font-size: 18px;
+  }
+
+  .currency {
+    font-size: 18px;
+  }
+
+  .amount {
+    font-size: 28px;
+  }
+
+  .details {
+    font-size: 13px;
+  }
+
+  .update-status,
+  .change {
+    font-size: 11px;
+  }
 }

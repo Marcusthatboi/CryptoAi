@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { cryptoAPI } from '../utils/api'
 import { useAuth } from '../hooks/useAuth'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { API_BASE } from '../utils/backendConfig'
 import PriceChart from '../components/PriceChart'
 import InvestmentTypeSelector from '../components/InvestmentTypeSelector'
 import UpgradePrompt from '../components/UpgradePrompt'
@@ -109,7 +110,7 @@ const evaluateTimingSignal = (history, stats) => {
 export default function InvestmentDetailPage() {
   const { cryptoId } = useParams()
   const navigate = useNavigate()
-  const { token } = useAuth()
+  const { token, logout } = useAuth()
   const { priceUpdates } = useWebSocket()
   const [crypto, setCrypto] = useState(null)
   const [priceHistory, setPriceHistory] = useState([])
@@ -216,7 +217,7 @@ export default function InvestmentDetailPage() {
       setLoading(true)
       setError(null)
 
-      // Fetch current price - with fallback to mock data
+      // Fetch current price history; if unavailable, fallback to a live spot quote.
       try {
         const priceResponse = await cryptoAPI.getHistory(cryptoId, 100)
         const records = priceResponse?.data?.records || []
@@ -238,11 +239,19 @@ export default function InvestmentDetailPage() {
           setPriceHistory([])
           setCurrentPrice(null)
         } else {
-          console.warn('API Error, using mock data:', apiErr.message)
-          // Generate mock price data for demo purposes
-          const mockData = generateMockPriceData(cryptoId)
-          setPriceHistory(mockData)
-          setCurrentPrice(mockData[mockData.length - 1])
+          console.warn('History API unavailable, trying live quote:', apiErr.message)
+          const liveQuoteResponse = await cryptoAPI.getPrice(cryptoId)
+          const liveQuote = liveQuoteResponse?.data
+          if (!liveQuote || !Number.isFinite(Number(liveQuote.price))) {
+            throw new Error('Live quote unavailable')
+          }
+
+          const syntheticHistory = [{
+            timestamp: liveQuote.timestamp || new Date().toISOString(),
+            price: Number(liveQuote.price)
+          }]
+          setPriceHistory(syntheticHistory)
+          setCurrentPrice(syntheticHistory[0])
           setHistoryLocked(false)
         }
       }
@@ -262,38 +271,14 @@ export default function InvestmentDetailPage() {
     }
   }
 
-  // Generate mock price data for demonstration
-  const generateMockPriceData = (cryptoId) => {
-    const basePrices = {
-      bitcoin: 45000,
-      ethereum: 2500,
-      cardano: 0.65,
-      solana: 110,
-      ripple: 0.55
-    }
-    
-    const basePrice = basePrices[cryptoId.toLowerCase()] || 100
-    const data = []
-    const now = new Date()
-    
-    for (let i = 100; i >= 0; i--) {
-      const volatility = (Math.random() - 0.5) * 2000
-      const trend = (100 - i) * (basePrice * 0.0001)
-      const price = basePrice + volatility + trend
-      
-      data.push({
-        timestamp: new Date(now.getTime() - i * 3600000).toISOString(),
-        price: Math.max(price, basePrice * 0.5) // Prevent negative prices
-      })
-    }
-    
-    return data
-  }
-
   // Handle Fake Money Investment
   const handleFakeInvest = async (investData) => {
     try {
-      const response = await fetch('http://localhost:8002/api/user/portfolio/invest/fake', {
+      if (!token) {
+        throw new Error('Please sign in to place an investment.')
+      }
+
+      const response = await fetch(`${API_BASE}/api/user/portfolio/invest/fake`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -308,8 +293,21 @@ export default function InvestmentDetailPage() {
       })
 
       if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Failed to record fake investment')
+        let detail = 'Failed to record fake investment'
+        try {
+          const error = await response.json()
+          detail = error?.detail || detail
+        } catch {
+          // Keep fallback detail when response is not JSON.
+        }
+
+        if (response.status === 401) {
+          logout()
+          navigate('/login')
+          throw new Error('Session expired. Please sign in again.')
+        }
+
+        throw new Error(detail)
       }
 
       return await response.json()
@@ -324,7 +322,11 @@ export default function InvestmentDetailPage() {
   // Handle Real Money Investment
   const handleRealInvest = async (investData) => {
     try {
-      const response = await fetch('http://localhost:8002/api/user/portfolio/invest/real', {
+      if (!token) {
+        throw new Error('Please sign in to place an investment.')
+      }
+
+      const response = await fetch(`${API_BASE}/api/user/portfolio/invest/real`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -340,8 +342,21 @@ export default function InvestmentDetailPage() {
       })
 
       if (!response.ok) {
-        const error = await response.json()
-        throw new Error(error.detail || 'Payment processing failed')
+        let detail = 'Payment processing failed'
+        try {
+          const error = await response.json()
+          detail = error?.detail || detail
+        } catch {
+          // Keep fallback detail when response is not JSON.
+        }
+
+        if (response.status === 401) {
+          logout()
+          navigate('/login')
+          throw new Error('Session expired. Please sign in again.')
+        }
+
+        throw new Error(detail)
       }
 
       return await response.json()

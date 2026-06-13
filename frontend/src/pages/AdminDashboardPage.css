@@ -336,10 +336,115 @@
   padding: 40px 12px;
 }
 
+.ad-section {
+  overflow: hidden;
+}
+
+.ad-campaign-form {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.ad-campaign-form input,
+.ad-campaign-form textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: #f8fbff;
+  padding: 12px 14px;
+  border-radius: 16px;
+}
+
+.ad-campaign-form textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.ad-campaign-form label {
+  display: grid;
+  gap: 6px;
+  color: rgba(248, 251, 255, 0.72);
+  font-size: 0.9rem;
+}
+
+.ad-campaign-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ad-campaign-form button {
+  justify-self: start;
+}
+
+.campaign-list {
+  display: grid;
+  gap: 12px;
+}
+
+.campaign-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.campaign-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.campaign-card-top p {
+  margin: 6px 0 0;
+  color: rgba(248, 251, 255, 0.68);
+}
+
+.campaign-status {
+  align-self: flex-start;
+  padding: 6px 10px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.campaign-status.status-active {
+  background: rgba(83, 255, 179, 0.16);
+  color: #d5ffe9;
+}
+
+.campaign-status.status-draft,
+.campaign-status.status-pending_payment {
+  background: rgba(83, 209, 255, 0.16);
+  color: #d2f2ff;
+}
+
+.campaign-status.status-exhausted,
+.campaign-status.status-cancelled {
+  background: rgba(255, 107, 107, 0.16);
+  color: #ffd7d7;
+}
+
+.campaign-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  color: rgba(248, 251, 255, 0.72);
+  font-size: 0.92rem;
+}
+
 @media (max-width: 1120px) {
   .summary-grid,
   .insight-grid,
   .customer-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .ad-campaign-grid {
     grid-template-columns: 1fr;
   }
 

@@ -42,13 +42,29 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8002
 Frontend:
 ```powershell
 cd frontend
-npm run dev
+npm run build
+npm run preview:prod
 ```
 
 Expected URLs:
 - API: `http://localhost:8002`
 - API docs: `http://localhost:8002/docs`
-- Frontend dev server: typically `http://localhost:5173`
+- Frontend production preview: `http://localhost:5175`
+
+This mode is independent of Visual Studio Code. The frontend runs from the built `dist/` output and does not require the editor to stay open.
+
+For Windows systems that should keep running after VS Code is closed or after reboot, install the included startup tasks:
+
+```powershell
+./INSTALL_SERVICES_ADMIN.bat
+```
+
+This installer creates three scheduled tasks:
+- backend on port `8002`
+- frontend production preview on port `5175`
+- Cloudflare tunnel process
+
+The tasks run at system startup and are configured to restart automatically if a process exits.
 
 ## 5) Docker Compose Production-Like Startup
 

@@ -1,0 +1,16 @@
+[Unit]
+Description=CryptoAI Docker Compose Stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/cryptoai/deploy/vps
+ExecStart=/usr/bin/docker compose --env-file /opt/cryptoai/deploy/vps/.env.vps -f /opt/cryptoai/deploy/vps/docker-compose.vps.yml up -d
+ExecStop=/usr/bin/docker compose --env-file /opt/cryptoai/deploy/vps/.env.vps -f /opt/cryptoai/deploy/vps/docker-compose.vps.yml down
+RemainAfterExit=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

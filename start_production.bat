@@ -1,43 +1,60 @@
 @echo off
+setlocal
+
 REM CryptoAI Production Startup Script
-REM Starts backend, tunnel, and frontend in separate windows
+REM Starts backend, tunnel, and production frontend preview in separate windows.
+
+set "PROJECT_DIR=%~dp0"
+set "BACKEND_SCRIPT=%PROJECT_DIR%start_backend.bat"
+set "TUNNEL_SCRIPT=%PROJECT_DIR%start_tunnel.bat"
+set "FRONTEND_SCRIPT=%PROJECT_DIR%start_frontend.bat"
 
 title CryptoAI Production Suite
 
 echo.
-echo ╔════════════════════════════════════════════════════════════╗
-echo ║        CryptoAI Production Startup                          ║
-echo ║  Backend: http://127.0.0.1:8002                            ║
-echo ║  Public:  https://dacryptobeast.com                        ║
-echo ║  API:     https://api.dacryptobeast.com                    ║
-echo ╚════════════════════════════════════════════════════════════╝
+echo ============================================================
+echo   CryptoAI Production Startup
+echo ============================================================
+echo   Backend:  http://127.0.0.1:8002
+echo   Frontend: http://127.0.0.1:5175
+echo   Public:   https://dacryptobeast.com
+echo   API:      https://api.dacryptobeast.com
 echo.
 
-REM Start Backend API
-echo [1/3] Starting Backend API on port 8002...
-start "CryptoAI Backend" /MIN cmd /k "cd /d C:\Users\marcu\CryproAI && python -m uvicorn backend.main:app --host 127.0.0.1 --port 8002 --reload"
-timeout /t 2 /nobreak
+if not exist "%BACKEND_SCRIPT%" (
+	echo [ERROR] Missing launcher: %BACKEND_SCRIPT%
+	exit /b 1
+)
 
-REM Start Cloudflare Tunnel
-echo [2/3] Starting Cloudflare Tunnel...
-start "CryptoAI Tunnel" /MIN cmd /k "cloudflared tunnel run dacryptobeast-root"
-timeout /t 2 /nobreak
+if not exist "%TUNNEL_SCRIPT%" (
+	echo [ERROR] Missing launcher: %TUNNEL_SCRIPT%
+	exit /b 1
+)
 
-REM Start Frontend Dev Server
-echo [3/3] Starting Frontend Dev Server on port 5173...
-start "CryptoAI Frontend" /MIN cmd /k "cd /d C:\Users\marcu\CryproAI\frontend && npm run dev"
-timeout /t 2 /nobreak
+if not exist "%FRONTEND_SCRIPT%" (
+	echo [ERROR] Missing launcher: %FRONTEND_SCRIPT%
+	exit /b 1
+)
+
+echo [1/3] Starting backend...
+start "CryptoAI Backend" /MIN cmd /c "cd /d "%PROJECT_DIR%" && "%BACKEND_SCRIPT%""
+
+echo [2/3] Starting Cloudflare tunnel...
+start "CryptoAI Tunnel" /MIN cmd /c "cd /d "%PROJECT_DIR%" && "%TUNNEL_SCRIPT%""
+
+echo [3/3] Starting production frontend preview...
+start "CryptoAI Frontend" /MIN cmd /c "cd /d "%PROJECT_DIR%" && "%FRONTEND_SCRIPT%""
 
 echo.
-echo ✅ All services starting...
+echo Startup commands sent.
 echo.
-echo 📊 Access points:
-echo   • Frontend (dev):     http://localhost:5174
-echo   • Frontend (public):  https://dacryptobeast.com
-echo   • API (public):       https://api.dacryptobeast.com
-echo   • API Docs:           https://api.dacryptobeast.com/docs
-echo   • Health Check:       https://api.dacryptobeast.com/health
+echo Access points:
+echo   Frontend (local):   http://127.0.0.1:5175
+echo   Frontend (public):  https://dacryptobeast.com
+echo   API (local):        http://127.0.0.1:8002
+echo   API (public):       https://api.dacryptobeast.com
+echo   Health:             https://api.dacryptobeast.com/health
 echo.
-echo ℹ️  Leave this window open. Services run in minimized windows.
-echo.
-pause
+echo This launcher can be closed after the three service windows start.
+
+exit /b 0

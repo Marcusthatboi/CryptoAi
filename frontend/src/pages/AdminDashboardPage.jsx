@@ -16,15 +16,34 @@ export default function AdminDashboardPage() {
   const [days, setDays] = useState(7)
   const [analytics, setAnalytics] = useState(null)
   const [customers, setCustomers] = useState([])
+  const [campaigns, setCampaigns] = useState([])
   const [filters, setFilters] = useState({ search: '', tier: '', status: '' })
   const [loading, setLoading] = useState(true)
+  const [adsLoading, setAdsLoading] = useState(true)
   const [savingUserId, setSavingUserId] = useState(null)
+  const [savingCampaignId, setSavingCampaignId] = useState(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [campaignError, setCampaignError] = useState('')
+  const [campaignSuccess, setCampaignSuccess] = useState('')
+  const [campaignForm, setCampaignForm] = useState({
+    title: '',
+    description: '',
+    url: '',
+    image: '',
+    placement: 'home',
+    sponsor_name: user?.username || 'CryptoAI Ads',
+    cpc_cents: 25,
+    budget_cents: 2500,
+  })
 
   useEffect(() => {
     loadAdminData(days, filters)
   }, [days])
+
+  useEffect(() => {
+    loadCampaigns()
+  }, [])
 
   const loadAdminData = async (windowDays = days, activeFilters = filters) => {
     try {
@@ -64,6 +83,70 @@ export default function AdminDashboardPage() {
   const applyFilters = async (event) => {
     event.preventDefault()
     await loadAdminData(days, filters)
+  }
+
+  const loadCampaigns = async () => {
+    try {
+      setAdsLoading(true)
+      setCampaignError('')
+      const response = await cryptoAPI.getAdCampaigns()
+      setCampaigns(response.data?.campaigns || [])
+    } catch (err) {
+      setCampaignError(err?.response?.data?.detail || 'Failed to load ad campaigns')
+    } finally {
+      setAdsLoading(false)
+    }
+  }
+
+  const handleCampaignFieldChange = (event) => {
+    const { name, value } = event.target
+    setCampaignForm((current) => ({
+      ...current,
+      [name]: name === 'cpc_cents' || name === 'budget_cents' ? Number(value) : value,
+    }))
+  }
+
+  const createCampaign = async (event) => {
+    event.preventDefault()
+
+    try {
+      setSavingCampaignId('create')
+      setCampaignError('')
+      setCampaignSuccess('')
+
+      const response = await cryptoAPI.createAdCampaign(campaignForm)
+      const campaign = response.data?.campaign
+      if (!campaign?.id) {
+        throw new Error('Campaign was not created')
+      }
+
+      setCampaignSuccess(`Created campaign "${campaign.title}". Open Stripe checkout to fund it.`)
+      await loadCampaigns()
+
+      const checkoutResponse = await cryptoAPI.createAdCheckoutSession(campaign.id, {
+        success_url: `${window.location.origin}/admin?ad_checkout=success`,
+        cancel_url: `${window.location.origin}/admin?ad_checkout=cancel`,
+        amount_cents: campaignForm.budget_cents,
+      })
+
+      const checkoutUrl = checkoutResponse.data?.url
+      if (checkoutUrl) {
+        window.open(checkoutUrl, '_blank', 'noopener,noreferrer')
+      }
+
+      setCampaignForm((current) => ({
+        ...current,
+        title: '',
+        description: '',
+        url: '',
+        image: '',
+        sponsor_name: user?.username || 'CryptoAI Ads',
+      }))
+    } catch (err) {
+      setCampaignError(err?.response?.data?.detail || 'Failed to create or fund campaign')
+    } finally {
+      setSavingCampaignId(null)
+    }
   }
 
   const updateCustomer = async (customer, patch) => {
@@ -321,6 +404,70 @@ export default function AdminDashboardPage() {
               })}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section className="panel-card ad-section">
+        <div className="panel-card-header">
+          <div>
+            <h2>Sponsored campaigns</h2>
+            <p>Create PPC placements and fund them through Stripe.</p>
+          </div>
+          <button className="refresh-button" onClick={loadCampaigns} disabled={adsLoading}>
+            {adsLoading ? 'Refreshing...' : 'Refresh campaigns'}
+          </button>
+        </div>
+
+        {(campaignError || campaignSuccess) && (
+          <div className={`admin-banner ${campaignError ? 'error' : 'success'}`}>
+            {campaignError || campaignSuccess}
+          </div>
+        )}
+
+        <form className="ad-campaign-form" onSubmit={createCampaign}>
+          <input name="title" value={campaignForm.title} onChange={handleCampaignFieldChange} placeholder="Campaign title" required />
+          <input name="url" value={campaignForm.url} onChange={handleCampaignFieldChange} placeholder="Landing page URL" required />
+          <textarea name="description" value={campaignForm.description} onChange={handleCampaignFieldChange} placeholder="Short ad description" rows="3" required />
+          <input name="image" value={campaignForm.image} onChange={handleCampaignFieldChange} placeholder="Optional image URL" />
+          <div className="ad-campaign-grid">
+            <input name="placement" value={campaignForm.placement} onChange={handleCampaignFieldChange} placeholder="Placement (home)" />
+            <input name="sponsor_name" value={campaignForm.sponsor_name} onChange={handleCampaignFieldChange} placeholder="Sponsor name" />
+            <label>
+              CPC cents
+              <input name="cpc_cents" type="number" min="1" value={campaignForm.cpc_cents} onChange={handleCampaignFieldChange} />
+            </label>
+            <label>
+              Budget cents
+              <input name="budget_cents" type="number" min="1" value={campaignForm.budget_cents} onChange={handleCampaignFieldChange} />
+            </label>
+          </div>
+          <button type="submit" disabled={savingCampaignId === 'create'}>
+            {savingCampaignId === 'create' ? 'Creating campaign...' : 'Create campaign and open Stripe'}
+          </button>
+        </form>
+
+        <div className="campaign-list">
+          {campaigns.map((campaign) => (
+            <article className="campaign-card" key={campaign.id}>
+              <div className="campaign-card-top">
+                <div>
+                  <strong>{campaign.title}</strong>
+                  <p>{campaign.description}</p>
+                </div>
+                <span className={`campaign-status status-${campaign.status}`}>{campaign.status}</span>
+              </div>
+              <div className="campaign-metrics">
+                <span>Placement: {campaign.placement}</span>
+                <span>CPC: ${((campaign.cpc_cents || 0) / 100).toFixed(2)}</span>
+                <span>Budget: ${((campaign.budget_cents || 0) / 100).toFixed(2)}</span>
+                <span>Remaining: ${((campaign.remaining_budget_cents || 0) / 100).toFixed(2)}</span>
+                <span>Clicks: {campaign.clicks || 0}</span>
+              </div>
+            </article>
+          ))}
+          {!adsLoading && campaigns.length === 0 && (
+            <div className="empty-state">No campaigns found yet.</div>
+          )}
         </div>
       </section>
     </div>

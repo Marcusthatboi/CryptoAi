@@ -189,6 +189,19 @@
   font-weight: 600;
 }
 
+.news-provider-badge {
+  display: inline-block;
+  margin-bottom: 14px;
+  margin-left: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(100, 200, 255, 0.15);
+  color: #b3e5fc;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .recommendations-near-limit {
   border-color: #ffb74d;
 }
@@ -289,6 +302,34 @@
   grid-column: 1 / -1;
   font-size: 11px;
   color: rgba(255, 255, 255, 0.72);
+}
+
+.recommendation-profile-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.recommendation-profile-item {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.recommendation-profile-item.long-term {
+  border-color: rgba(76, 175, 80, 0.55);
+}
+
+.recommendation-profile-item.swing {
+  border-color: rgba(255, 193, 7, 0.55);
+}
+
+.recommendation-profile-item.speculative {
+  border-color: rgba(244, 67, 54, 0.55);
 }
 
 /* Recommendations Grid */
@@ -463,6 +504,12 @@
   margin-bottom: 8px;
 }
 
+.rec-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .symbol {
   font-size: 20px;
   font-weight: 700;
@@ -477,6 +524,58 @@
   background: rgba(255, 255, 255, 0.15);
   border-radius: 12px;
   white-space: nowrap;
+}
+
+.bucket-indicator {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.bucket-indicator.long_term {
+  border-color: rgba(76, 175, 80, 0.6);
+  color: #d8ffd8;
+}
+
+.bucket-indicator.swing {
+  border-color: rgba(255, 193, 7, 0.6);
+  color: #ffeab7;
+}
+
+.bucket-indicator.speculative {
+  border-color: rgba(244, 67, 54, 0.65);
+  color: #ffd0d0;
+}
+
+.score-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.score-chip {
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.score-chip.risk-adjusted {
+  border-color: rgba(76, 175, 80, 0.6);
+}
+
+.score-chip.confidence {
+  border-color: rgba(33, 150, 243, 0.6);
+}
+
+.score-chip.rank {
+  border-color: rgba(255, 193, 7, 0.6);
 }
 
 .rec-body {

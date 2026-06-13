@@ -36,14 +36,21 @@ export default function LoginPage() {
     setError('')
 
     try {
-      await login(formData.username, formData.password)
+      await login(formData.username.trim(), formData.password)
 
       setSuccess('✅ Login successful! Redirecting...')
       setTimeout(() => {
         navigate('/dashboard')
       }, 1500)
     } catch (err) {
-      setError(err.message || 'Login failed')
+      const status = err?.response?.status
+      const detail = err?.response?.data?.detail
+      if (status === 401) {
+        setError(detail || 'Invalid username/email or password. You can use Send Reset Link if needed.')
+      } else {
+        setError(detail || err.message || 'Login failed')
+      }
+    } finally {
       setLoading(false)
     }
   }

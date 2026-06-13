@@ -1,0 +1,44 @@
+{
+  email {$LETSENCRYPT_EMAIL}
+}
+
+{$APP_DOMAIN} {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "SAMEORIGIN"
+    Referrer-Policy "strict-origin-when-cross-origin"
+  }
+  reverse_proxy frontend:8080
+}
+
+{$API_DOMAIN} {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+  }
+
+  @cors_allowed header Origin https://dacryptobeast.com https://www.dacryptobeast.com
+  @cors_preflight {
+    method OPTIONS
+    header Origin *
+    header Access-Control-Request-Method *
+  }
+
+  handle @cors_preflight {
+    header @cors_allowed Access-Control-Allow-Origin "{http.request.header.Origin}"
+    header @cors_allowed Access-Control-Allow-Credentials "true"
+    header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    header Access-Control-Allow-Headers "Content-Type, Authorization, Stripe-Signature"
+    header Vary "Origin"
+    respond "" 204
+  }
+
+  header @cors_allowed Access-Control-Allow-Origin "{http.request.header.Origin}"
+  header @cors_allowed Access-Control-Allow-Credentials "true"
+  header @cors_allowed Vary "Origin"
+
+  reverse_proxy backend:8002
+}

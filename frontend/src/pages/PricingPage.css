@@ -38,6 +38,128 @@
   font-size: 1.1rem;
 }
 
+/* ── Launch promo banner ── */
+.launch-promo-banner {
+  background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+  border-radius: 12px;
+  padding: 16px 24px;
+  margin-bottom: 32px;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.35);
+  animation: promo-pulse 2.4s ease-in-out infinite;
+}
+
+.launch-promo-banner.promo-ended {
+  background: rgba(107, 114, 128, 0.5);
+  animation: none;
+  font-size: 0.95rem;
+  justify-content: center;
+}
+
+@keyframes promo-pulse {
+  0%, 100% { box-shadow: 0 4px 20px rgba(239, 68, 68, 0.35); }
+  50% { box-shadow: 0 4px 32px rgba(239, 68, 68, 0.65); }
+}
+
+.promo-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.promo-fire { font-size: 1.8rem; }
+
+.promo-text strong { font-size: 1.2rem; letter-spacing: 0.5px; }
+.promo-text span { font-size: 0.95rem; opacity: 0.92; }
+
+.promo-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  background: rgba(255,255,255,0.18);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.promo-toggle-label:hover { background: rgba(255,255,255,0.28); }
+.promo-toggle-input { width: 18px; height: 18px; cursor: pointer; accent-color: white; }
+
+/* discounted price display */
+.price-original {
+  text-decoration: line-through;
+  opacity: 0.6;
+  font-size: 0.85em;
+  margin-right: 6px;
+}
+
+.price-discounted {
+  color: #4ade80;
+  font-weight: 700;
+}
+
+/* ── Email verification notice ── */
+.verify-email-notice {
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid #fbbf24;
+  border-radius: 10px;
+  padding: 14px 20px;
+  margin-bottom: 24px;
+  color: #fbbf24;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.95rem;
+}
+
+.verify-email-btn {
+  background: #fbbf24;
+  color: #1f2937;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+.verify-email-btn:hover { background: #f59e0b; }
+.verify-email-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.checkout-readiness-banner {
+  max-width: 900px;
+  margin: 0 auto 20px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.checkout-readiness-banner.ready {
+  background: rgba(21, 128, 61, 0.25);
+  border: 2px solid #22c55e;
+}
+
+.checkout-readiness-banner.blocked {
+  background: rgba(185, 28, 28, 0.25);
+  border: 2px solid #ef4444;
+}
+
+.checkout-readiness-note {
+  font-weight: 500;
+  opacity: 0.95;
+}
+
 .checkout-message {
   max-width: 900px;
   margin: 0 auto 24px;
@@ -62,6 +184,35 @@
   margin-top: 6px;
   font-weight: 500;
   opacity: 0.95;
+}
+
+.manual-checkout-toast {
+  max-width: 900px;
+  margin: 0 auto 20px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.88);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.manual-checkout-link {
+  color: #93c5fd;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.manual-checkout-dismiss {
+  margin-left: auto;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: transparent;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
 }
 
 .checkout-modal-overlay {
@@ -142,6 +293,11 @@
   box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.08);
 }
 
+.wallet-qr-code svg {
+  max-width: 100%;
+  height: auto;
+}
+
 .checkout-divider {
   position: relative;
   margin: 18px 0 14px;
@@ -181,10 +337,24 @@
 }
 
 @media (max-width: 640px) {
+  .checkout-modal-overlay {
+    padding: 8px;
+  }
+
+  .checkout-modal {
+    max-height: 94vh;
+    border-radius: 12px;
+    padding: 16px;
+  }
+
   .wallet-checkout-card {
     grid-template-columns: 1fr;
     justify-items: center;
     text-align: center;
+  }
+
+  .wallet-qr-code {
+    width: 100%;
   }
 }
 
@@ -348,6 +518,7 @@
   background: #f0f0f0;
   color: #666;
   min-height: 48px;
+  touch-action: manipulation;
 }
 
 .action-btn:hover:not(:disabled) {
@@ -565,6 +736,14 @@
   .support-help-card {
     padding: 18px;
   }
+
+  .manual-checkout-toast {
+    padding: 12px;
+  }
+
+  .manual-checkout-dismiss {
+    margin-left: 0;
+  }
 }
 
 @media (max-width: 480px) {
@@ -605,7 +784,8 @@
   }
 
   .action-btn {
-    padding: 12px 16px;
-    font-size: 0.95rem;
+    padding: 12px 14px;
+    font-size: 0.9rem;
+    min-height: 46px;
   }
 }

@@ -13,14 +13,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Password hashing - use pbkdf2_sha256 which doesn't require external C libraries
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+# Password hashing defaults to Argon2id while keeping compatibility with legacy hashes.
+pwd_context = CryptContext(schemes=["argon2", "pbkdf2_sha256"], deprecated="auto")
 
 MONGO_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "cryptoai")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "dacryptobeast_admin").strip() or "dacryptobeast_admin"
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@dacryptobeast.com").strip() or "admin@dacryptobeast.com"
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+FORCE_ADMIN_PASSWORD_ROTATION = os.getenv("FORCE_ADMIN_PASSWORD_ROTATION", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _resolve_admin_password() -> tuple[str, bool]:
@@ -60,6 +61,7 @@ async def init_admin_user():
             "is_active": True,
             "is_admin": True,
             "role": "admin",
+            "must_change_password": bool(FORCE_ADMIN_PASSWORD_ROTATION),
             "portfolio": {
                 "total_value": 100000.0,
                 "cash": 100000.0,

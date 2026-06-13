@@ -29,6 +29,9 @@ export default function InvestmentTypeSelector({
     binance: { ready: null, message: 'Checking...' },
     alpaca: { ready: null, message: 'Checking...' }
   })
+  const [checkoutReadiness, setCheckoutReadiness] = useState({
+    stripe: { ready: null, live_mode: false, message: 'Checking...' }
+  })
   const [applePayCtaReady, setApplePayCtaReady] = useState(false)
   const [applePayCtaStatus, setApplePayCtaStatus] = useState('checking')
 
@@ -78,9 +81,10 @@ export default function InvestmentTypeSelector({
         alpaca: { ready: null, message: 'Checking...' }
       })
 
-      const [binanceResult, alpacaResult] = await Promise.allSettled([
+      const [binanceResult, alpacaResult, readinessResult] = await Promise.allSettled([
         cryptoAPI.getBinanceStatus(),
-        cryptoAPI.getAlpacaAccount()
+        cryptoAPI.getAlpacaAccount(),
+        cryptoAPI.getLiveReadiness()
       ])
 
       if (cancelled) {
@@ -94,6 +98,15 @@ export default function InvestmentTypeSelector({
         alpaca: alpacaResult.status === 'fulfilled'
           ? { ready: true, message: 'Authenticated' }
           : { ready: false, message: 'Not authenticated' }
+      })
+
+      const liveReadiness = readinessResult?.status === 'fulfilled' ? readinessResult.value?.data : null
+      setCheckoutReadiness({
+        stripe: {
+          ready: Boolean(liveReadiness?.stripe?.ready),
+          live_mode: Boolean(liveReadiness?.stripe?.live_mode),
+          message: String(liveReadiness?.stripe?.message || 'Stripe not configured for checkout')
+        }
       })
     }
 
@@ -125,6 +138,7 @@ export default function InvestmentTypeSelector({
   const canSubmitRealOrder =
     availableProviders[executionProvider] === true ||
     (executionProvider === 'auto' && availableProviders.auto === true)
+  const canStartCheckout = checkoutReadiness.stripe.ready === true
 
   useEffect(() => {
     if (investmentType !== 'real') {
@@ -245,6 +259,14 @@ export default function InvestmentTypeSelector({
       setMessage({
         type: 'error',
         text: 'Please enter a symbol before placing a real order.'
+      })
+      return
+    }
+
+    if (!canStartCheckout) {
+      setMessage({
+        type: 'error',
+        text: `${checkoutReadiness.stripe.message}. Configure Stripe credentials before attempting real-money checkout.`
       })
       return
     }
@@ -534,6 +556,9 @@ export default function InvestmentTypeSelector({
                 </span>
                 <span className={`provider-pill ${providerReadiness.alpaca.ready === true ? 'ready' : providerReadiness.alpaca.ready === false ? 'down' : 'checking'}`}>
                   Alpaca: {providerReadiness.alpaca.message}
+                </span>
+                <span className={`provider-pill ${checkoutReadiness.stripe.ready === true ? 'ready' : checkoutReadiness.stripe.ready === false ? 'down' : 'checking'}`}>
+                  Stripe: {checkoutReadiness.stripe.message}
                 </span>
               </div>
 

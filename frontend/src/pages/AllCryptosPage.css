@@ -1,0 +1,120 @@
+.all-cryptos-page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 18px 42px;
+  color: #f0f5ff;
+}
+
+.all-cryptos-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  background: linear-gradient(130deg, #16243b 0%, #1b1a36 50%, #3c2f1b 100%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  padding: 22px;
+  margin-bottom: 14px;
+}
+
+.all-cryptos-header .eyebrow {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9ee2ff;
+}
+
+.all-cryptos-header h1 {
+  margin: 8px 0 6px;
+  font-size: clamp(1.5rem, 2.6vw, 2rem);
+}
+
+.all-cryptos-header p {
+  margin: 0;
+  color: #c9d7f0;
+}
+
+.back-btn {
+  background: #22334d;
+  color: #e6efff;
+  border: 1px solid rgba(200, 220, 255, 0.28);
+  border-radius: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+.back-btn:hover {
+  background: #2a3f5e;
+}
+
+.all-cryptos-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.all-cryptos-search {
+  flex: 1;
+  max-width: 420px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  background: #101829;
+  color: #edf4ff;
+  padding: 10px 12px;
+}
+
+.all-cryptos-count {
+  color: #b7c9ec;
+  font-size: 0.92rem;
+}
+
+.state-note {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(63, 84, 121, 0.4);
+  border: 1px solid rgba(169, 196, 255, 0.35);
+  margin-bottom: 14px;
+}
+
+.state-note.error {
+  background: rgba(105, 37, 37, 0.35);
+  border-color: rgba(255, 166, 166, 0.5);
+}
+
+.all-cryptos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 760px) {
+  .all-cryptos-page {
+    padding: 16px 12px 30px;
+  }
+
+  .all-cryptos-header {
+    flex-direction: column;
+  }
+
+  .all-cryptos-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .all-cryptos-search {
+    max-width: none;
+  }
+
+  .all-cryptos-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .back-btn {
+    width: 100%;
+    min-height: 44px;
+  }
+}

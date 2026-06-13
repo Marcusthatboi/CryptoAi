@@ -61,6 +61,8 @@ export default function RecommendationsPanel() {
   const [nextUpdateInSeconds, setNextUpdateInSeconds] = useState(FALLBACK_POLL_INTERVAL_MS / 1000)
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null)
   const [candidateUniverse, setCandidateUniverse] = useState([])
+  const [recommendationProfile, setRecommendationProfile] = useState(null)
+  const [newsProvider, setNewsProvider] = useState('none')
   const { isConnected, message } = useWebSocket()
   const requestInFlightRef = useRef(false)
   const lastRealtimeRefreshRef = useRef(0)
@@ -143,6 +145,8 @@ export default function RecommendationsPanel() {
       setDailyResetAt(payload.daily_reset_at ?? null)
       setHourlyResetAt(payload.hourly_reset_at ?? null)
       setCandidateUniverse(Array.isArray(payload.candidate_universe) ? payload.candidate_universe : [])
+      setRecommendationProfile(payload.recommendation_profile || null)
+      setNewsProvider(payload?._debug?.news_provider || 'none')
       setRetryAfterSeconds(null)
       setUpgradeRequired(false)
       setBlockedLimitType(null)
@@ -180,275 +184,18 @@ export default function RecommendationsPanel() {
         return
       }
 
-      console.warn('Failed to fetch recommendations, using mock data:', err)
-      // Use mock recommendations when API fails
-      const mockRecs = [
-        {
-          symbol: 'BITCOIN',
-          reason: 'Bitcoin is showing strong uptrend with +0.33% growth in 24h. Technical indicators suggest continued momentum with good entry points for long-term investors. Strong institutional interest supports price stability and growth potential.',
-          risk: 'MEDIUM',
-          allocation: 30,
-          trend: 'UPTREND',
-          current_price: 45339.26
-        },
-        {
-          symbol: 'ETHEREUM',
-          reason: 'Ethereum exhibits positive trend with +1.25% growth. DeFi ecosystem expansion and upcoming protocol upgrades provide strong fundamentals. Recommended for balanced portfolios seeking exposure to smart contract platforms.',
-          risk: 'MEDIUM',
-          allocation: 25,
-          trend: 'UPTREND',
-          current_price: 2540.15
-        },
-        {
-          symbol: 'CARDANO',
-          reason: 'Cardano trading in stable range with +0.95% change. Strong development roadmap and sustainability focus make it attractive for ESG-conscious investors. Good potential in emerging markets and blockchain adoption.',
-          risk: 'LOW',
-          allocation: 20,
-          trend: 'NEUTRAL',
-          current_price: 0.6785
-        },
-        {
-          symbol: 'SOLANA',
-          reason: 'Solana shows positive momentum with +2.15% daily gain. Network improvements and reduced transaction costs make it competitive. Suitable for growth-oriented portfolios with medium-term outlook.',
-          risk: 'HIGH',
-          allocation: 15,
-          trend: 'UPTREND',
-          current_price: 112.45
-        },
-        {
-          symbol: 'RIPPLE',
-          reason: 'Ripple displays slight downward trend with -0.85% change. Regulatory clarity in multiple jurisdictions provides stability. Recommended for contrarian investors practicing dollar-cost averaging into dips.',
-          risk: 'LOW',
-          allocation: 10,
-          trend: 'DOWNTREND',
-          current_price: 0.5125
-        },
-        {
-          symbol: 'POLKADOT',
-          reason: 'Polkadot showing interoperability potential with +1.08% gain. Multi-chain ecosystem development and strong developer community drive adoption. Excellent for investors seeking blockchain infrastructure exposure.',
-          risk: 'MEDIUM',
-          allocation: 12,
-          trend: 'UPTREND',
-          current_price: 8.234
-        },
-        {
-          symbol: 'DOGECOIN',
-          reason: 'Dogecoin trading with positive sentiment and +0.71% momentum. Community-driven projects and mainstream adoption increasing. Fun alternative for speculative short-term traders.',
-          risk: 'HIGH',
-          allocation: 8,
-          trend: 'UPTREND',
-          current_price: 0.1045
-        },
-        {
-          symbol: 'AVALANCHE',
-          reason: 'Avalanche demonstrating strong performance with +1.04% daily gain. High-speed transactions and low fees attract DeFi protocols. Great for fast-growing blockchain ecosystem investors.',
-          risk: 'HIGH',
-          allocation: 11,
-          trend: 'UPTREND',
-          current_price: 8.91
-        },
-        {
-          symbol: 'CHAINLINK',
-          reason: 'Chainlink maintains crucial oracle infrastructure role with +0.37% growth. Increasing smart contract integrations and partnerships support long-term value. Essential component for DeFi ecosystem.',
-          risk: 'LOW',
-          allocation: 9,
-          trend: 'NEUTRAL',
-          current_price: 9.05
-        },
-        {
-          symbol: 'POLYGON',
-          reason: 'Polygon scaling solution showing +0.82% momentum. Layer-2 adoption accelerating across major protocols. Perfect for investors seeking Ethereum ecosystem growth.',
-          risk: 'MEDIUM',
-          allocation: 10,
-          trend: 'UPTREND',
-          current_price: 0.8234
-        },
-        {
-          symbol: 'LITECOIN',
-          reason: 'Litecoin maintaining stability with -1.57% pullback. Established payment network with strong community. Suitable for conservative long-term cryptocurrency allocation.',
-          risk: 'LOW',
-          allocation: 6,
-          trend: 'DOWNTREND',
-          current_price: 50.70
-        },
-        {
-          symbol: 'UNISWAP',
-          reason: 'Uniswap leading DEX with +0.55% growth. Increasing trading volume and token swap activity. Essential for decentralized finance portfolio exposure.',
-          risk: 'MEDIUM',
-          allocation: 8,
-          trend: 'NEUTRAL',
-          current_price: 6.78
-        },
-        {
-          symbol: 'MONERO',
-          reason: 'Monero privacy coin showing +2.34% uptrend. Privacy-focused technology gaining institutional interest. For investors seeking alternative value propositions.',
-          risk: 'HIGH',
-          allocation: 7,
-          trend: 'UPTREND',
-          current_price: 175.42
-        },
-        {
-          symbol: 'COSMOS',
-          reason: 'Cosmos network showing +1.67% momentum. Inter-blockchain communication protocol attracting new chains. Ideal for infrastructure-focused portfolios.',
-          risk: 'MEDIUM',
-          allocation: 9,
-          trend: 'UPTREND',
-          current_price: 12.34
-        },
-        {
-          symbol: 'VET (VECHAIN)',
-          reason: 'VeChain displaying +0.92% growth. Supply chain and IoT solutions gaining enterprise adoption. Emerging leader in blockchain-based tracking.',
-          risk: 'LOW',
-          allocation: 5,
-          trend: 'NEUTRAL',
-          current_price: 0.0456
-        },
-        {
-          symbol: 'THETA',
-          reason: 'Theta showing +1.45% uptrend. Video streaming platform tokenization and NFT integration expanding. Great for media tech enthusiasts.',
-          risk: 'HIGH',
-          allocation: 6,
-          trend: 'UPTREND',
-          current_price: 2.156
-        },
-        {
-          symbol: 'FILECOIN',
-          reason: 'Filecoin demonstrating +2.08% momentum. Decentralized storage adoption accelerating with enterprise clients. For investors in Web3 infrastructure.',
-          risk: 'HIGH',
-          allocation: 7,
-          trend: 'UPTREND',
-          current_price: 8.92
-        },
-        {
-          symbol: 'ALGORAND',
-          reason: 'Algorand showing +0.73% steady performance. Scalable blockchain for enterprise solutions. Suitable for tech-focused institutional investors.',
-          risk: 'LOW',
-          allocation: 7,
-          trend: 'NEUTRAL',
-          current_price: 0.4562
-        },
-        {
-          symbol: 'ZCASH',
-          reason: 'Zcash maintaining privacy focus with +1.12% growth. Regulatory clarity emerging in key markets. For privacy-conscious long-term holders.',
-          risk: 'MEDIUM',
-          allocation: 4,
-          trend: 'UPTREND',
-          current_price: 48.76
-        },
-        {
-          symbol: 'HELIUM',
-          reason: 'Helium showing +3.24% explosive uptrend. Decentralized wireless network deployment accelerating. High-risk/high-reward growth opportunity.',
-          risk: 'HIGH',
-          allocation: 5,
-          trend: 'UPTREND',
-          current_price: 4.321
-        },
-        // Best Stocks - Tech Leaders
-        {
-          symbol: 'APPLE',
-          reason: 'Apple (AAPL) showing strong fundamentals with consistent performance. Leading brand in consumer electronics and services. Reliable long-term dividend-paying stock with strong balance sheet.',
-          risk: 'LOW',
-          allocation: 25,
-          trend: 'UPTREND',
-          current_price: 182.45
-        },
-        {
-          symbol: 'MICROSOFT',
-          reason: 'Microsoft (MSFT) demonstrating growth through AI integration and cloud services. Strong enterprise adoption of Azure and Office 365. Excellent foundation for tech-focused portfolios.',
-          risk: 'LOW',
-          allocation: 22,
-          trend: 'UPTREND',
-          current_price: 415.78
-        },
-        {
-          symbol: 'NVIDIA',
-          reason: 'NVIDIA (NVDA) leading AI chip revolution with exceptional demand. GPUs powering ChatGPT, data centers, and autonomous vehicles. High growth potential but higher volatility than mega-cap peers.',
-          risk: 'MEDIUM',
-          allocation: 18,
-          trend: 'UPTREND',
-          current_price: 875.42
-        },
-        {
-          symbol: 'TESLA',
-          reason: 'Tesla (TSLA) at forefront of EV revolution and renewable energy. Strong growth trajectory but subject to market sentiment swings. Suitable for growth-oriented investors with medium-term horizon.',
-          risk: 'HIGH',
-          allocation: 14,
-          trend: 'UPTREND',
-          current_price: 285.63
-        },
-        {
-          symbol: 'META',
-          reason: 'Meta (META) pivoting to AI and metaverse opportunities. Recent profitability improvements and strong advertising fundamentals. Growth play with significant upside potential.',
-          risk: 'HIGH',
-          allocation: 12,
-          trend: 'UPTREND',
-          current_price: 512.34
-        },
-        {
-          symbol: 'GOOGLE',
-          reason: 'Alphabet/Google (GOOGL) dominant in search and advertising. Strong cash flow and diversified revenue streams. AI investments positioning for future growth in emerging technologies.',
-          risk: 'LOW',
-          allocation: 20,
-          trend: 'NEUTRAL',
-          current_price: 178.92
-        },
-        {
-          symbol: 'AMAZON',
-          reason: 'Amazon (AMZN) expanding AWS dominance and cloud computing leadership. E-commerce still growing with strong logistics network. Excellent for exposure to tech infrastructure.',
-          risk: 'LOW',
-          allocation: 19,
-          trend: 'UPTREND',
-          current_price: 193.67
-        },
-        {
-          symbol: 'VISA',
-          reason: 'Visa (V) providing exposure to global payment trends with consistent dividend growth. Essential financial infrastructure with recurring revenue model. Perfect for conservative diversification.',
-          risk: 'LOW',
-          allocation: 15,
-          trend: 'NEUTRAL',
-          current_price: 267.45
-        },
-        {
-          symbol: 'BERKSHIRE',
-          reason: 'Berkshire Hathaway (BRK.B) Warren Buffett\'s diversified holding company. Stable value investment with exposure to insurance, railroads, utilities. Ideal for risk-averse long-term investors.',
-          risk: 'LOW',
-          allocation: 12,
-          trend: 'NEUTRAL',
-          current_price: 378.56
-        },
-        {
-          symbol: 'JPMORGAN',
-          reason: 'JPMorgan Chase (JPM) leading investment bank with strong balance sheet. Benefits from rising interest rates and market activity. Solid dividend yield and financial sector exposure.',
-          risk: 'LOW',
-          allocation: 10,
-          trend: 'UPTREND',
-          current_price: 198.34
-        }
-      ]
-      
-      // Add action fields to mock recommendations to ensure consistency
-      const enrichedMockRecs = mockRecs.map(rec => ({
-        ...rec,
-        recommendation: 'BUY',
-        action_category: 'buy-now',
-        action_label: 'BUY NOW'
-      }))
-
-      const fallbackUniverse = enrichedMockRecs.slice(0, 10).map((rec, index) => ({
-        crypto_id: String(rec.symbol || '').toLowerCase(),
-        symbol: String(rec.symbol || '').toUpperCase(),
-        score: 100 - index,
-        sources: ['fallback']
-      }))
-      
-      setRecommendations(enrichedMockRecs)
-      setReasoning('Portfolio analysis based on technical indicators, market sentiment, and fundamental metrics. Diversified allocation across different market caps and risk profiles.')
+      console.error('Failed to fetch live recommendations:', err)
+      setRecommendations([])
+      setReasoning('')
       setRiskLevel('LOW')
-      setTier((previousTier) => previousTier)
-      setLimitApplied(20)
-      setCandidateUniverse(fallbackUniverse)
+      setLimitApplied(0)
+      setCandidateUniverse([])
+      setRecommendationProfile(null)
+      setNewsProvider('none')
       setUpgradeRequired(false)
-      setError(null)
+      setBlockedLimitType(null)
+      setRetryAfterSeconds(null)
+      setError(err?.response?.data?.detail || 'Live recommendations are currently unavailable. Please retry in a moment.')
     } finally {
       requestInFlightRef.current = false
       if (!background) {
@@ -485,6 +232,17 @@ export default function RecommendationsPanel() {
   }
 
   const categorizeRecommendation = (rec) => {
+    const strategyBucket = String(rec?.strategy_bucket || '').trim().toLowerCase()
+    if (strategyBucket === 'long_term') {
+      return CATEGORIES.LONG_TERM.id
+    }
+    if (strategyBucket === 'swing') {
+      return CATEGORIES.QUICK_TURNAROUND.id
+    }
+    if (strategyBucket === 'speculative') {
+      return CATEGORIES.DANGEROUS_PROFITABLE.id
+    }
+
     if ((rec.risk === 'LOW' || rec.risk === 'MEDIUM') && rec.allocation <= 30) {
       return CATEGORIES.LONG_TERM.id
     }
@@ -545,10 +303,33 @@ export default function RecommendationsPanel() {
   }
 
   const getFilteredRecommendations = () => {
-    return recommendations.filter((rec) => {
+    const parseScore = (value) => {
+      const numeric = Number(value)
+      return Number.isFinite(numeric) ? numeric : null
+    }
+
+    const filtered = recommendations.filter((rec) => {
       const categoryMatch = categorizeRecommendation(rec) === selectedCategory
       const actionMatch = selectedActionFilter === ACTION_FILTERS.ALL.id || getActionCategory(rec) === selectedActionFilter
       return categoryMatch && actionMatch
+    })
+
+    return filtered.sort((left, right) => {
+      const rightRiskAdjusted = parseScore(right?.risk_adjusted_score)
+      const leftRiskAdjusted = parseScore(left?.risk_adjusted_score)
+
+      if (rightRiskAdjusted !== null || leftRiskAdjusted !== null) {
+        return (rightRiskAdjusted ?? -1) - (leftRiskAdjusted ?? -1)
+      }
+
+      const rightConfidence = parseScore(right?.confidence_score)
+      const leftConfidence = parseScore(left?.confidence_score)
+
+      if (rightConfidence !== null || leftConfidence !== null) {
+        return (rightConfidence ?? -1) - (leftConfidence ?? -1)
+      }
+
+      return Number(right?.allocation || 0) - Number(left?.allocation || 0)
     })
   }
 
@@ -674,6 +455,12 @@ export default function RecommendationsPanel() {
         </div>
       </div>
 
+      {newsProvider && newsProvider !== 'none' && (
+        <div className="news-provider-badge" title="Data source for live news sentiment analysis">
+          📰 News: {newsProvider === 'newsdata' ? 'NewsData.io' : newsProvider === 'newsapi' ? 'NewsAPI' : newsProvider === 'cryptopanic' ? 'CryptoPanic' : 'Unknown'}
+        </div>
+      )}
+
       {error && <div className="error-message">⚠️ {error}</div>}
 
       {shareMessage && <div className="share-message">✅ {shareMessage}</div>}
@@ -726,6 +513,20 @@ export default function RecommendationsPanel() {
                     <span className="candidate-sources">{Array.isArray(asset.sources) ? asset.sources.join(' + ') : 'unknown source'}</span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {recommendationProfile && (
+            <div className="recommendation-profile-box">
+              <div className="recommendation-profile-item long-term">
+                🏦 Long Term: {Number(recommendationProfile.long_term || 0)}
+              </div>
+              <div className="recommendation-profile-item swing">
+                ⚡ Swing: {Number(recommendationProfile.swing || 0)}
+              </div>
+              <div className="recommendation-profile-item speculative">
+                💎 Speculative: {Number(recommendationProfile.speculative || 0)}
               </div>
             </div>
           )}
@@ -862,37 +663,41 @@ export default function RecommendationsPanel() {
             </div>
           </div>
 
-          {/* Category Tabs */}
-          <div className="category-tabs">
-            {Object.values(CATEGORIES).map(category => {
-              const stats = getCategoryStats(category.id)
-              return (
-                <button
-                  key={category.id}
-                  className={`category-tab ${selectedCategory === category.id ? 'active' : ''}`}
-                  onClick={() => setSelectedCategory(category.id)}
-                  title={`${stats.count} recommendations`}
-                >
-                  <span className="category-icon">{category.icon}</span>
-                  <span className="category-name">{category.label}</span>
-                  <span className="category-count">{stats.count}</span>
-                </button>
-              )
-            })}
-          </div>
-
-          <div className="action-tabs">
-            {Object.values(ACTION_FILTERS).map((filter) => (
-              <button
-                key={filter.id}
-                className={`action-tab ${selectedActionFilter === filter.id ? 'active' : ''}`}
-                onClick={() => setSelectedActionFilter(filter.id)}
-                title={`${getActionFilterCount(filter.id)} recommendations`}
+          <div className="recommendations-filters category-dropdown-row">
+            <div className="filter-group">
+              <label htmlFor="category-select">📂 Recommendation Category</label>
+              <select
+                id="category-select"
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="filter-select"
               >
-                <span className="action-tab-label">{filter.label}</span>
-                <span className="action-tab-count">{getActionFilterCount(filter.id)}</span>
-              </button>
-            ))}
+                {Object.values(CATEGORIES).map((category) => {
+                  const stats = getCategoryStats(category.id)
+                  return (
+                    <option key={category.id} value={category.id}>
+                      {category.label} ({stats.count})
+                    </option>
+                  )
+                })}
+              </select>
+            </div>
+
+            <div className="filter-group">
+              <label htmlFor="action-filter-select">🎯 Action Filter</label>
+              <select
+                id="action-filter-select"
+                value={selectedActionFilter}
+                onChange={(e) => setSelectedActionFilter(e.target.value)}
+                className="filter-select"
+              >
+                {Object.values(ACTION_FILTERS).map((filter) => (
+                  <option key={filter.id} value={filter.id}>
+                    {filter.label} ({getActionFilterCount(filter.id)})
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Recommendations Grid */}
@@ -909,9 +714,16 @@ export default function RecommendationsPanel() {
                 >
                   <div className="rec-header">
                     <span className="symbol">{rec.symbol}</span>
-                    <span className="risk-indicator">
-                      {getRiskEmoji(rec.risk)} {rec.risk}
-                    </span>
+                    <div className="rec-header-meta">
+                      <span className="risk-indicator">
+                        {getRiskEmoji(rec.risk)} {rec.risk}
+                      </span>
+                      {rec.strategy_bucket && (
+                        <span className={`bucket-indicator ${String(rec.strategy_bucket).toLowerCase()}`}>
+                          {String(rec.strategy_bucket).replace('_', ' ').toUpperCase()}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="rec-body">
@@ -920,6 +732,26 @@ export default function RecommendationsPanel() {
                     </div>
 
                     <div className="rec-details">
+                      {(rec.risk_adjusted_score !== undefined || rec.confidence_score !== undefined) && (
+                        <div className="score-row">
+                          {rec.risk_adjusted_score !== undefined && (
+                            <div className="score-chip risk-adjusted">
+                              Risk-Adjusted: {Number(rec.risk_adjusted_score).toFixed(1)}
+                            </div>
+                          )}
+                          {rec.confidence_score !== undefined && (
+                            <div className="score-chip confidence">
+                              Confidence: {Number(rec.confidence_score).toFixed(1)}
+                            </div>
+                          )}
+                          {rec.rank_in_universe !== undefined && (
+                            <div className="score-chip rank">
+                              Universe Rank: #{rec.rank_in_universe}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {rec.current_price && (
                         <div className="price-info">
                           <span className="label">Current Price:</span>

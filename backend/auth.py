@@ -56,8 +56,8 @@ def has_weak_secret_key() -> bool:
     lowered = value.lower()
     return any(token in lowered for token in ["replace", "changeme", "todo", "secret-key"])
 
-# Password hashing - use pbkdf2_sha256 which doesn't require external C libraries
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+# Password hashing: keep Argon2 for stronger new hashes while verifying legacy PBKDF2.
+pwd_context = CryptContext(schemes=["argon2", "pbkdf2_sha256"], deprecated="auto")
 
 
 # ============================================================================
@@ -287,9 +287,15 @@ def decode_token(token: str) -> Dict[str, Any]:
 async def create_user(db: AsyncIOMotorDatabase, username: str, password: str, email: Optional[str] = None) -> Dict:
     """Create a new user in MongoDB"""
     users_col = db["users"]
+    normalized_username = str(username or "").strip()
     
     # Check if user already exists
-    existing_user = await users_col.find_one({"username": username})
+    existing_user = await users_col.find_one({
+        "username": {
+            "$regex": f"^\\s*{re.escape(normalized_username)}\\s*$",
+            "$options": "i",
+        }
+    })
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -298,16 +304,16 @@ async def create_user(db: AsyncIOMotorDatabase, username: str, password: str, em
     
     # Create user document
     user_doc = {
-        "username": username,
+        "username": normalized_username,
         "password": hash_password(password),
         "email": email,
         "created_at": datetime.utcnow().isoformat(),
         "updated_at": datetime.utcnow().isoformat(),
         "is_active": True,
-        "is_admin": is_admin_username(username),
-        "role": "admin" if is_admin_username(username) else "user",
+        "is_admin": is_admin_username(normalized_username),
+        "role": "admin" if is_admin_username(normalized_username) else "user",
         "portfolio": {
-            "total_value": 0,
+            "total_value": 100000.0,
             "cash": 100000.0,  # Default starting balance
             "holdings": [],
             "personal_buying_power": 0.0,
@@ -323,20 +329,37 @@ async def create_user(db: AsyncIOMotorDatabase, username: str, password: str, em
         "settings": {
             "theme": "dark",
             "notifications": True,
-            "default_currency": "USD"
+            "default_currency": "USD",
+            "alert_auto_buy": {
+                "enabled": False,
+                "direction": "down",
+                "amount_per_order_usd": 50.0,
+                "max_orders_per_day": 3,
+                "cooldown_minutes": 30,
+                "last_triggered": {},
+                "updated_at": datetime.utcnow().isoformat(),
+            },
         }
     }
     
     result = await users_col.insert_one(user_doc)
     user_doc["_id"] = str(result.inserted_id)
-    logger.info(f"✅ User created: {username}")
+    logger.info(f"✅ User created: {normalized_username}")
     return user_doc
 
 
 async def get_user_by_username(db: AsyncIOMotorDatabase, username: str) -> Optional[Dict]:
     """Get user by username"""
     users_col = db["users"]
-    user = await users_col.find_one({"username": username})
+    normalized_username = str(username or "").strip()
+    if not normalized_username:
+        return None
+    user = await users_col.find_one({
+        "username": {
+            "$regex": f"^\\s*{re.escape(normalized_username)}\\s*$",
+            "$options": "i",
+        }
+    })
     return user
 
 

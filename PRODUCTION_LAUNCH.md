@@ -7,7 +7,7 @@ Double-click: **`start_production.bat`**
 All services will launch in minimized windows:
 - ✅ Backend API on http://127.0.0.1:8002
 - ✅ Cloudflare Tunnel routing all domains
-- ✅ Frontend dev server on http://localhost:5173
+- ✅ Frontend production preview on http://127.0.0.1:5175
 
 ## Service Status
 
@@ -28,7 +28,7 @@ All services will launch in minimized windows:
   - api.dacryptobeast.com → 127.0.0.1:8002
 
 ### Frontend
-- **Dev Server**: http://localhost:5173
+- **Production Preview**: http://127.0.0.1:5175
 - **Production Build**: `/frontend/dist/`
 - **Framework**: React + Vite
 - **Branding**: DaCryptoBeast
@@ -68,7 +68,7 @@ Invoke-RestMethod 'https://api.dacryptobeast.com/health' | ConvertTo-Json
 
 ### Frontend Access
 ```
-http://localhost:5173
+http://127.0.0.1:5175
 ```
 
 ### API Docs
@@ -81,14 +81,23 @@ https://api.dacryptobeast.com/docs
 ### Option 1: Manual Startup
 Run `start_production.bat` after each reboot.
 
-### Option 2: Windows Task Scheduler (Auto-start on boot)
+### Option 2: Included Windows Service Installer (Recommended)
+Run as Administrator:
+
+```powershell
+./INSTALL_SERVICES_ADMIN.bat
+```
+
+This registers three startup tasks for backend, tunnel, and frontend preview. The tasks run at boot and restart automatically if one of the processes exits.
+
+### Option 3: Manual Task Scheduler
 1. Open Task Scheduler
 2. Create Basic Task
 3. Name: "CryptoAI Production"
 4. Trigger: "At startup"
 5. Action: "Start program" → `C:\Users\marcu\CryproAI\start_production.bat`
 
-### Option 3: Startup Folder
+### Option 4: Startup Folder
 Copy `start_production.bat` to:
 ```
 C:\Users\marcu\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup
@@ -119,7 +128,8 @@ python -m pip install -r requirements.txt
 ```powershell
 cd C:\Users\marcu\CryproAI\frontend
 npm install
-npm run dev
+npm run build
+npm run preview:prod
 ```
 
 ### Tunnel not connecting
@@ -145,7 +155,7 @@ taskkill /PID <PID> /F
 | API Domain | https://api.dacryptobeast.com |
 | API Docs | https://api.dacryptobeast.com/docs |
 | Health Check | https://api.dacryptobeast.com/health |
-| Frontend (dev) | http://localhost:5173 |
+| Frontend (local preview) | http://127.0.0.1:5175 |
 
 ## Environment Variables
 
@@ -168,7 +178,7 @@ ADMIN_PASSWORD=your-secure-password
 1. ✅ Backend running
 2. ✅ Tunnel running
 3. ✅ Frontend built
-4. ⏳ Setup auto-start on reboot (optional, see Persistence Options above)
+4. ⏳ Setup auto-start on reboot with `INSTALL_SERVICES_ADMIN.bat`
 5. ⏳ Deploy frontend to production server (optional)
 
 ## Support

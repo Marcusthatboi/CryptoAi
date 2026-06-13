@@ -7,6 +7,13 @@ echo   CryptoAI Backend API
 echo =====================================================
 echo.
 
+REM Kill any existing non-privileged python process on 8002 so updated code loads.
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":8002" ^| findstr "LISTENING"') do (
+    echo [INFO] Stopping existing backend process PID %%a
+    taskkill /PID %%a /F >nul 2>&1
+)
+timeout /t 2 /nobreak >nul
+
 if not exist ".venv" (
     echo Creating virtual environment...
     python -m venv .venv
@@ -32,12 +39,14 @@ if "%SUPPORT_SMTP_PASSWORD%"=="" (
     echo.
 )
 
-REM Set environment for local development
-set "APP_ENV=development"
-set "FRONTEND_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,http://127.0.0.1:3000,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,http://127.0.0.1:5176,https://dacryptobeast.com,https://www.dacryptobeast.com"
+REM Preserve .env values when set; otherwise apply sane production-oriented defaults.
+if "%APP_ENV%"=="" set "APP_ENV=production"
+if "%ENVIRONMENT%"=="" set "ENVIRONMENT=%APP_ENV%"
+if "%FRONTEND_ALLOWED_ORIGINS%"=="" set "FRONTEND_ALLOWED_ORIGINS=https://dacryptobeast.com,https://www.dacryptobeast.com,http://127.0.0.1:5175,http://localhost:5175"
 
 echo [INFO] APP_ENV: %APP_ENV%
-echo [INFO] CORS Origins configured for development
+echo [INFO] ENVIRONMENT: %ENVIRONMENT%
+echo [INFO] FRONTEND_ALLOWED_ORIGINS: %FRONTEND_ALLOWED_ORIGINS%
 
 pip show fastapi > nul 2>&1
 if errorlevel 1 (

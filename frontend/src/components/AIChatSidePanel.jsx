@@ -14,6 +14,7 @@ export default function AIChatSidePanel() {
   ])
   const [inputValue, setInputValue] = useState('')
   const [loading, setLoading] = useState(false)
+  const [grammarLoading, setGrammarLoading] = useState(false)
   const [ollamaStatus, setOllamaStatus] = useState({ available: false, model: 'N/A' })
   const [statusLoading, setStatusLoading] = useState(true)
   const messagesEndRef = useRef(null)
@@ -110,6 +111,23 @@ export default function AIChatSidePanel() {
     }
   }
 
+  const handleFixGrammar = async () => {
+    if (!inputValue.trim() || grammarLoading || loading) return
+
+    try {
+      setGrammarLoading(true)
+      const response = await cryptoAPI.fixGrammar(inputValue)
+      const corrected = response?.data?.corrected
+      if (corrected && typeof corrected === 'string') {
+        setInputValue(corrected)
+      }
+    } catch (error) {
+      console.error('Grammar tool error:', error)
+    } finally {
+      setGrammarLoading(false)
+    }
+  }
+
   return (
     <>
       {/* Toggle Button */}
@@ -198,12 +216,20 @@ export default function AIChatSidePanel() {
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Ask about holdings, profile, prices... (Enter to send)"
-            disabled={loading}
+            disabled={loading || grammarLoading}
             rows="3"
           />
+          <button
+            onClick={handleFixGrammar}
+            disabled={loading || grammarLoading || !inputValue.trim()}
+            className="grammar-button"
+            title="Fix grammar and spelling"
+          >
+            {grammarLoading ? '✍️' : '📝'}
+          </button>
           <button 
             onClick={handleSendMessage} 
-            disabled={loading || !inputValue.trim()}
+            disabled={loading || grammarLoading || !inputValue.trim()}
             className="send-button"
           >
             {loading ? '⏳' : '📤'}

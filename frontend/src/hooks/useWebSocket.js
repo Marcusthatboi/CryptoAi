@@ -8,24 +8,10 @@ import {
   useRef,
   useState
 } from 'react'
+import { WS_BASE } from '../utils/backendConfig'
 
 const WebSocketContext = createContext(null)
-const DEFAULT_WS_URL = (() => {
-  const configuredBaseUrl = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_BASE_URL
-  if (configuredBaseUrl) {
-    const normalizedBase = configuredBaseUrl
-      .replace(/^http/i, 'ws')
-      .replace(/\/$/, '')
-
-    if (normalizedBase.endsWith('/ws')) {
-      return normalizedBase
-    }
-
-    return `${normalizedBase}/ws`
-  }
-
-  return 'ws://localhost:8002/ws'
-})()
+const DEFAULT_WS_URL = WS_BASE.endsWith('/ws') ? WS_BASE : `${WS_BASE}/ws`
 
 /**
  * Shared WebSocket provider that keeps a single live connection open

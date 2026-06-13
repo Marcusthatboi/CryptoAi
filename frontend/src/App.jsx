@@ -18,11 +18,18 @@ import ResetPasswordPage from './pages/ResetPasswordPage'
 import AdminDashboardPage from './pages/AdminDashboardPage'
 import AutoTradingPage from './pages/AutoTradingPage'
 import SettingsPage from './pages/SettingsPage'
+import AffiliateToolsPage from './pages/AffiliateToolsPage'
+import AllCryptosPage from './pages/AllCryptosPage'
 import LanguageSelector from './components/LanguageSelector'
+import DashboardDirectory from './components/DashboardDirectory'
+import AdPanel from './components/AdPanel'
 import { useLanguage } from './context/LanguageContext'
 import { useAuth } from './hooks/useAuth.jsx'
 import { cryptoAPI } from './utils/api'
+import { BACKEND_HEALTH_URL } from './utils/backendConfig'
 import './App.css'
+
+const BUILD_STAMP = typeof __BUILD_STAMP__ !== 'undefined' ? __BUILD_STAMP__ : 'local-dev'
 
 const DEFAULT_CRYPTO_IDS = [
   'bitcoin',
@@ -59,10 +66,6 @@ const DEFAULT_CRYPTO_IDS = [
 const PRICE_PANEL_LIMIT = 250
 
 const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL || 'cryptosupport74@gmail.com'
-// Use localhost:8002 for local dev, otherwise use VITE_API_BASE_URL or default to localhost:8002
-const isLocalDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-const API_BASE = isLocalDev ? 'http://localhost:8002' : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002')
-const BACKEND_HEALTH_URL = `${API_BASE.replace(/\/$/, '')}/health`
 
 const normalizeIds = (ids = []) => {
   const normalized = ids
@@ -82,6 +85,7 @@ function Dashboard() {
   const [priceSearchError, setPriceSearchError] = useState('')
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [statsError, setStatsError] = useState('')
   const [upgradeBanner, setUpgradeBanner] = useState({ visible: false, tier: '' })
   const [supportModalOpen, setSupportModalOpen] = useState(false)
 
@@ -102,6 +106,7 @@ function Dashboard() {
 
   const fetchStats = async () => {
     try {
+      setStatsError('')
       const response = await cryptoAPI.getStats()
       setStats(response.data)
 
@@ -111,23 +116,13 @@ function Dashboard() {
       if (idsFromAssets.length > 0) {
         setCryptoIds(idsFromAssets)
       } else {
-        const idsFromStats = normalizeIds(response?.data?.cryptocurrencies)
-        if (idsFromStats.length > 0) {
-          setCryptoIds(idsFromStats)
-        } else {
-          const configResponse = await cryptoAPI.getConfig()
-          const idsFromConfig = normalizeIds(configResponse?.data?.popular_cryptocurrencies)
-          setCryptoIds(idsFromConfig.length > 0 ? idsFromConfig : DEFAULT_CRYPTO_IDS)
-        }
+        // Assets endpoint returned empty; use DEFAULT_CRYPTO_IDS as reliable baseline.
+        setCryptoIds(DEFAULT_CRYPTO_IDS)
       }
     } catch (err) {
-      console.error('Failed to fetch stats, using mock data:', err)
-      // Use mock stats when API fails
-      setStats({
-        total_records: 1250,
-        unique_cryptos: 5,
-        last_update: new Date().toISOString()
-      })
+      console.error('Failed to fetch stats:', err)
+      setStatsError(t('stats_load_failed', 'Live market stats are temporarily unavailable.'))
+      setStats(null)
       setCryptoIds(DEFAULT_CRYPTO_IDS)
     } finally {
       setLoading(false)
@@ -219,6 +214,12 @@ function Dashboard() {
           <a href="/pricing" className="pricing-link" style={{ marginRight: '15px', textDecoration: 'none', color: '#fff', fontWeight: '500' }}>
             💳 {t('nav_pricing', 'Pricing')}
           </a>
+          <a href="/tools" className="pricing-link" style={{ marginRight: '15px', textDecoration: 'none', color: '#ffe08a', fontWeight: '500' }}>
+            🛍 {t('nav_tools', 'Tools')}
+          </a>
+          <a href="/all-cryptos" className="pricing-link" style={{ marginRight: '15px', textDecoration: 'none', color: '#9be9ff', fontWeight: '500' }}>
+            🌐 {t('nav_all_cryptos', 'All 250')}
+          </a>
           <button className="support-btn" onClick={() => setSupportModalOpen(true)}>
             🛟 {t('nav_support', 'Support')}
           </button>
@@ -238,7 +239,13 @@ function Dashboard() {
         </div>
       </header>
 
-      <main className="main-content">
+      <div className="dashboard-layout-outer">
+      <div className="dashboard-layout">
+        <aside className="dashboard-sidebar-left">
+          <DashboardDirectory />
+        </aside>
+
+      <main className="main-content dashboard-main-col">
         {upgradeBanner.visible && (
           <section className="upgrade-success-banner">
             <div>
@@ -254,12 +261,12 @@ function Dashboard() {
         )}
 
         {/* Subscription Status */}
-        <section className="subscription-section">
+        <section id="section-subscription" className="subscription-section">
           <SubscriptionStatus />
         </section>
 
         {/* Stats Section */}
-        <section className="stats-section">
+        <section id="section-stats" className="stats-section">
           <div className="stat-card">
             <span className="stat-label">{t('stats_total_records', 'Total Records')}</span>
             <span className="stat-value">{stats?.total_records || 0}</span>
@@ -275,29 +282,36 @@ function Dashboard() {
             </span>
           </div>
         </section>
+        {statsError && (
+          <section className="stats-section" style={{ marginTop: '10px' }}>
+            <div className="stat-card" style={{ gridColumn: '1 / -1', color: '#fca5a5' }}>
+              {statsError}
+            </div>
+          </section>
+        )}
 
         {/* AI Recommendations Section */}
-        <section className="recommendations-section">
+        <section id="section-recommendations" className="recommendations-section">
           <RecommendationsPanel />
         </section>
 
         {/* Auto Trading Section */}
-        <section className="auto-trading-section">
+        <section id="section-auto-trading" className="auto-trading-section">
           <AutoTradingPanel />
         </section>
 
         {/* Portfolio Section */}
-        <section className="portfolio-section">
+        <section id="section-portfolio" className="portfolio-section">
           <PortfolioPanel />
         </section>
 
         {/* User Investments Section */}
-        <section className="user-investments-section">
+        <section id="section-investments" className="user-investments-section">
           <UserInvestmentsPanel />
         </section>
 
         {/* Price Cards Section */}
-        <section className="prices-section">
+        <section id="section-prices" className="prices-section">
           <div className="prices-header">
             <h2>{t('prices_heading', 'Current Prices')}</h2>
             <div className="prices-search-wrap">
@@ -358,10 +372,16 @@ function Dashboard() {
         </section>
 
         {/* Alerts Section */}
-        <section className="alerts-section">
+        <section id="section-alerts" className="alerts-section">
           <AlertPanel />
         </section>
       </main>
+
+        <aside className="dashboard-sidebar-right">
+          <AdPanel />
+        </aside>
+      </div>
+      </div>
 
       <footer className="footer">
         <p>{t('footer_tagline', 'CryptoAI © 2026 | Real-time cryptocurrency analytics powered by CoinGecko API')}</p>
@@ -375,6 +395,7 @@ function Dashboard() {
             {t('footer_support_form', 'open support form')}
           </button>
         </p>
+        <p className="build-stamp">Build: {BUILD_STAMP}</p>
       </footer>
 
       <SupportModal
@@ -540,6 +561,12 @@ export default function App() {
         <Route path="/settings" element={
           <ProtectedRoute>
             <SettingsPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/tools" element={<AffiliateToolsPage />} />
+        <Route path="/all-cryptos" element={
+          <ProtectedRoute>
+            <AllCryptosPage />
           </ProtectedRoute>
         } />
       </Routes>
