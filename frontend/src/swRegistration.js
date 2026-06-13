@@ -26,7 +26,18 @@ export async function registerServiceWorker() {
   }
 
   try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    for (const item of registrations) {
+      const scriptUrl = item.active?.scriptURL || item.waiting?.scriptURL || item.installing?.scriptURL || '';
+      const isExpected = scriptUrl.includes('/sw.js');
+      const isRootScope = item.scope.endsWith('/');
+      if (!isExpected || !isRootScope) {
+        await item.unregister();
+      }
+    }
+
     const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    await registration.update();
 
     registration.addEventListener('updatefound', () => {
       const worker = registration.installing;
@@ -40,6 +51,10 @@ export async function registerServiceWorker() {
         }
       });
     });
+
+    setInterval(() => {
+      registration.update().catch(() => {});
+    }, 60 * 60 * 1000);
   } catch (error) {
     console.error('Service worker registration failed:', error);
   }

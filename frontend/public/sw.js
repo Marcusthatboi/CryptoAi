@@ -1,5 +1,5 @@
 /* eslint-disable no-restricted-globals */
-const STATIC_CACHE = 'cryptoai-static-v1';
+const STATIC_CACHE = 'cryptoai-static-v2';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -23,6 +23,10 @@ function isApiRequest(url) {
   return url.origin === 'https://api.dacryptobeast.com' || url.pathname.startsWith('/api/');
 }
 
+function isOffline() {
+  return typeof self.navigator !== 'undefined' && self.navigator.onLine === false;
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (!request || request.method !== 'GET') {
@@ -37,6 +41,10 @@ self.addEventListener('fetch', (event) => {
       try {
         return await fetch(request);
       } catch (_error) {
+        if (!isOffline()) {
+          throw _error;
+        }
+
         return new Response(
           JSON.stringify({ detail: 'Network unavailable', source: 'service-worker-fallback' }),
           {
@@ -71,6 +79,10 @@ self.addEventListener('fetch', (event) => {
 
   // Static assets: cache-first with network refresh.
   event.respondWith((async () => {
+    if (url.pathname === '/sw.js') {
+      return fetch(request);
+    }
+
     const cached = await caches.match(request);
     if (cached) {
       return cached;

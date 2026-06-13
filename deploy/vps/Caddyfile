@@ -13,16 +13,14 @@
 
   @service_worker path /sw.js
   header @service_worker Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+  header @service_worker CDN-Cache-Control "no-store"
+  header @service_worker Cloudflare-CDN-Cache-Control "no-store"
 
   reverse_proxy frontend:8080
 }
 
 {$API_DOMAIN} {
   encode zstd gzip
-  header {
-    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-    X-Content-Type-Options "nosniff"
-  }
 
   @cors_allowed header Origin https://dacryptobeast.com https://www.dacryptobeast.com
   @cors_preflight {
@@ -35,22 +33,19 @@
     header @cors_allowed Access-Control-Allow-Origin "{http.request.header.Origin}"
     header @cors_allowed Access-Control-Allow-Credentials "true"
     header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-    header Access-Control-Allow-Headers "Content-Type, Authorization, Stripe-Signature, Accept, Origin, X-Requested-With"
-    header Vary "Origin"
+    header Access-Control-Allow-Headers "Accept, Authorization, Content-Type, Origin, Stripe-Signature, X-Requested-With, X-CSRF-Token"
+    header Access-Control-Max-Age "600"
+    header Vary "Origin, Access-Control-Request-Method, Access-Control-Request-Headers"
     respond "" 204
   }
-
-  header @cors_allowed Access-Control-Allow-Origin "{http.request.header.Origin}"
-  header @cors_allowed Access-Control-Allow-Credentials "true"
-  header @cors_allowed Vary "Origin"
 
   handle_errors {
     @cors_allowed_error header Origin https://dacryptobeast.com https://www.dacryptobeast.com
     header @cors_allowed_error Access-Control-Allow-Origin "{http.request.header.Origin}"
     header @cors_allowed_error Access-Control-Allow-Credentials "true"
     header @cors_allowed_error Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-    header @cors_allowed_error Access-Control-Allow-Headers "Content-Type, Authorization, Stripe-Signature, Accept, Origin, X-Requested-With"
-    header @cors_allowed_error Vary "Origin"
+    header @cors_allowed_error Access-Control-Allow-Headers "Accept, Authorization, Content-Type, Origin, Stripe-Signature, X-Requested-With, X-CSRF-Token"
+    header @cors_allowed_error Vary "Origin, Access-Control-Request-Method, Access-Control-Request-Headers"
     respond "{\"detail\":\"Upstream unavailable\"}" {http.error.status_code}
   }
 
