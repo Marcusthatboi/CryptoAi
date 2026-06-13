@@ -335,7 +335,8 @@ def _normalize_crypto_ids(crypto_ids: List[str]) -> List[str]:
     normalized = []
 
     for value in crypto_ids or []:
-        crypto_id = str(value or "").strip().lower()
+        # Strip any :quantity notation (e.g., "tether:1" -> "tether")
+        crypto_id = str(value or "").split(":")[0].strip().lower()
         if not crypto_id or crypto_id in seen:
             continue
         seen.add(crypto_id)
