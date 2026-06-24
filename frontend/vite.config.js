@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '127.0.0.1',
       port: 5175,
-      strictPort: true,
+      strictPort: false,
       middlewareMode: false,
       allowedHosts: ['dacryptobeast.com', 'www.dacryptobeast.com', 'localhost', '127.0.0.1', '192.168.1.147'],
       hmr: useTunnelHmr

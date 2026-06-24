@@ -2,6 +2,8 @@
 
 A modular, production-ready Python project for tracking cryptocurrency prices with AI/ML foundations. Built with real-time data fetching, trend analysis, alerts, and machine learning data preparation.
 
+If you are a new contributor, start with [FULL_STACK_README.md](FULL_STACK_README.md) for software installs, local startup commands, and public deployment commands.
+
 ## Documentation
 
 Primary maintained documentation is now in `docs/`:
